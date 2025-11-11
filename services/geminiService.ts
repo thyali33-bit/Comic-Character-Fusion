@@ -164,7 +164,6 @@ export const generateCharacterAssets = async (
       Your single most important task is the format of the output.
       - **THE ONLY VALID OUTPUT IS A SINGLE IMAGE ORGANIZED AS A 2X2 GRID.**
       - **THIS GRID MUST CONTAIN EXACTLY FOUR (4) CHARACTER VIEWS. NOT THREE, NOT SIX, NOT EIGHT. EXACTLY FOUR.** This rule is absolute and non-negotiable.
-      - The four views in the grid MUST be separated by thin, clean, black lines to create a distinct 2x2 grid.
       - The entire background of the single composite image MUST be a simple, neutral medium gray (#808080).
       - DO NOT generate more than four views. DO NOT generate individual images.
 
@@ -230,7 +229,6 @@ export const generateCharacterAssets = async (
       Your single most important task is the format of the output.
       - **THE ONLY VALID OUTPUT IS A SINGLE IMAGE ORGANIZED AS A 2X2 GRID.**
       - **THIS GRID MUST CONTAIN EXACTLY FOUR (4) CHARACTER VIEWS. NOT THREE, NOT SIX, NOT EIGHT. EXACTLY FOUR.** This rule is absolute and non-negotiable.
-      - The four views in the grid MUST be separated by thin, clean, black lines to create a distinct 2x2 grid.
       - The entire background of the single composite image MUST be a simple, neutral medium gray (#808080).
       - DO NOT generate more than four views. DO NOT generate individual images.
 
@@ -249,8 +247,8 @@ export const generateCharacterAssets = async (
       **Final Check:** ${finalStyleCheck}
     `;
 
-    // STEP 2: Generate the sheets sequentially to avoid rate-limiting issues.
-    const orthoSheetResponse = await ai.models.generateContent({
+    // STEP 2: Generate the sheets in parallel, using the portrait for consistency.
+    const orthoSheetPromise = ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: { parts: [
             { text: orthoSheetPrompt }, 
@@ -261,13 +259,7 @@ export const generateCharacterAssets = async (
         config: { responseModalities: [Modality.IMAGE] }
     });
 
-    const orthoSheetPart = orthoSheetResponse.candidates?.[0]?.content?.parts?.[0];
-    if (!orthoSheetPart?.inlineData) {
-        throw new Error("Failed to generate the orthographic sheet. The model may have refused the request.");
-    }
-    const orthoSheetImage = `data:${orthoSheetPart.inlineData.mimeType};base64,${orthoSheetPart.inlineData.data}`;
-
-    const angledSheetResponse = await ai.models.generateContent({
+    const angledSheetPromise = ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: { parts: [
             { text: angledSheetPrompt }, 
@@ -277,24 +269,23 @@ export const generateCharacterAssets = async (
         ] },
         config: { responseModalities: [Modality.IMAGE] }
     });
+
+    const [orthoSheetResponse, angledSheetResponse] = await Promise.all([orthoSheetPromise, angledSheetPromise]);
     
+    const orthoSheetPart = orthoSheetResponse.candidates?.[0]?.content?.parts?.[0];
     const angledSheetPart = angledSheetResponse.candidates?.[0]?.content?.parts?.[0];
-    if (!angledSheetPart?.inlineData) {
-        throw new Error("Failed to generate the angled views sheet. The model may have refused the request.");
+
+    if (!orthoSheetPart?.inlineData || !angledSheetPart?.inlineData) {
+        throw new Error("No image was generated for the character sheets. The model may have refused the request.");
     }
+    
+    const orthoSheetImage = `data:${orthoSheetPart.inlineData.mimeType};base64,${orthoSheetPart.inlineData.data}`;
     const angledSheetImage = `data:${angledSheetPart.inlineData.mimeType};base64,${angledSheetPart.inlineData.data}`;
 
     return { portrait: portraitImage, orthoSheet: orthoSheetImage, angledSheet: angledSheetImage };
 
   } catch (error) {
     console.error("Error generating character assets:", error);
-    if (error instanceof Error) {
-        // Check if the error message contains the quota details
-        if (error.message.includes('RESOURCE_EXHAUSTED') || error.message.includes('quota')) {
-             throw new Error("You have exceeded your request quota. Please wait a moment and try again, or check your plan and billing details.");
-        }
-        throw new Error(error.message);
-    }
-    throw new Error("Failed to generate character. An unknown error occurred.");
+    throw new Error("Failed to generate character. Please check the console for more details.");
   }
 };
