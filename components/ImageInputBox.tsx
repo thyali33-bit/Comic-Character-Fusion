@@ -1,4 +1,3 @@
-
 import React, { useRef } from 'react';
 import UploadIcon from './icons/UploadIcon';
 
@@ -42,11 +41,12 @@ const ImageInputBox: React.FC<ImageInputBoxProps> = ({ title, step, imagePreview
           onChange={handleFileChange}
         />
         {imagePreviewUrl ? (
-          <img src={imagePreviewUrl} alt="Preview" className="w-full h-full object-contain rounded-md" />
+          <img src={imagePreviewUrl} alt="Bản xem trước" className="w-full h-full object-contain rounded-md" />
         ) : (
           <div className="text-center text-gray-500 group-hover:text-cyan-400 transition-colors">
             <UploadIcon className="w-12 h-12 mx-auto" />
-            <p>Click to upload image</p>
+            <p>Nhấn để tải ảnh lên</p>
+            <p className="text-xs mt-1">Hoặc để trống để AI tự sáng tạo</p>
           </div>
         )}
       </div>

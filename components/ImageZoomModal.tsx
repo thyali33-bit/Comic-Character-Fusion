@@ -87,12 +87,12 @@ const ImageZoomModal: React.FC<ImageZoomModalProps> = ({ imageUrl, onClose }) =>
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label="Image viewer"
+      aria-label="Trình xem ảnh"
     >
       <button
         onClick={onClose}
         className="absolute top-4 right-4 text-white text-4xl font-bold hover:text-cyan-400 transition-colors z-50"
-        aria-label="Close"
+        aria-label="Đóng"
       >
         &times;
       </button>
@@ -105,7 +105,7 @@ const ImageZoomModal: React.FC<ImageZoomModalProps> = ({ imageUrl, onClose }) =>
         <img
           ref={imageRef}
           src={imageUrl}
-          alt="Zoomed view"
+          alt="Ảnh phóng to"
           className={`max-w-full max-h-full transition-transform duration-75 ease-out ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
           style={{ 
             transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
