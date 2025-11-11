@@ -1,0 +1,5 @@
+{
+  "name": "Comic Character Fusion",
+  "description": "An AI-powered application to design unique comic book characters by fusing features from three reference images: one for the character's base, one for the pose, and one for the artistic style. The app generates a character sheet with 8 different perspectives.",
+  "requestFramePermissions": []
+}
