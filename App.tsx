@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback } from 'react';
 import { Accessories, InfluenceValues, GenerationParams } from './types';
 import { generateCharacterAssets, generateVariationAssets } from './services/geminiService';
@@ -5,6 +6,8 @@ import ImageInputBox from './components/ImageInputBox';
 import SpinnerIcon from './components/icons/SpinnerIcon';
 import ImageZoomModal from './components/ImageZoomModal';
 import DownloadIcon from './components/icons/DownloadIcon';
+import ResetIcon from './components/icons/ResetIcon';
+import TurntableGallery from './components/TurntableGallery';
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -67,6 +70,7 @@ const App: React.FC = () => {
     const [generatedPortrait, setGeneratedPortrait] = useState<string | null>(null);
     const [generatedOrthoSheet, setGeneratedOrthoSheet] = useState<string | null>(null);
     const [generatedAngledSheet, setGeneratedAngledSheet] = useState<string | null>(null);
+    const [generatedTurntableViews, setGeneratedTurntableViews] = useState<string[] | null>(null);
     
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -97,6 +101,37 @@ const App: React.FC = () => {
     const handleInfluenceChange = (key: keyof InfluenceValues) => (value: number) => {
         setInfluences(prev => ({ ...prev, [key]: value }));
     };
+
+    const handleReset = () => {
+        setFaceImage(null);
+        setStyleImage(null);
+        setClothingImage(null);
+        setAccessories({
+            bracelets: false,
+            necklaces: false,
+            earrings: false,
+            eyeglasses: false,
+        });
+        setInfluences({
+            character: 70,
+            clothing: 70,
+            style: 70,
+        });
+        setOrthoPose('standing');
+        setAngledPose('random');
+        setFacialExpression('neutral');
+        setFacialExpressionIntensity(50);
+        setQuality('standard');
+        setGeneratedPortrait(null);
+        setGeneratedOrthoSheet(null);
+        setGeneratedAngledSheet(null);
+        setGeneratedTurntableViews(null);
+        setError(null);
+        setLastGenerationParams(null);
+        setVariationStrength(30);
+        setSeed(null);
+        setUseRandomSeed(true);
+    };
     
     const handleGenerate = useCallback(async () => {
         setIsLoading(true);
@@ -121,7 +156,7 @@ const App: React.FC = () => {
         setLastGenerationParams(params);
 
         try {
-            const { portrait, orthoSheet, angledSheet } = await generateCharacterAssets(
+            const { portrait, orthoSheet, angledSheet, turntableViews } = await generateCharacterAssets(
                 params.faceImage,
                 params.styleImage,
                 params.clothingImage,
@@ -137,6 +172,7 @@ const App: React.FC = () => {
             setGeneratedPortrait(portrait);
             setGeneratedOrthoSheet(orthoSheet);
             setGeneratedAngledSheet(angledSheet);
+            setGeneratedTurntableViews(turntableViews);
         } catch (err: any) {
             setError(err.message || 'Đã xảy ra lỗi không xác định. Vui lòng kiểm tra bảng điều khiển để biết thêm chi tiết.');
         } finally {
@@ -154,7 +190,7 @@ const App: React.FC = () => {
         setSeed(currentSeed);
         
         try {
-            const { portrait, orthoSheet, angledSheet } = await generateVariationAssets(
+            const { portrait, orthoSheet, angledSheet, turntableViews } = await generateVariationAssets(
                 generatedPortrait,
                 variationStrength,
                 lastGenerationParams,
@@ -163,6 +199,7 @@ const App: React.FC = () => {
             setGeneratedPortrait(portrait);
             setGeneratedOrthoSheet(orthoSheet);
             setGeneratedAngledSheet(angledSheet);
+            setGeneratedTurntableViews(turntableViews);
 
             setLastGenerationParams(prev => prev ? {...prev, seed: currentSeed } : null);
 
@@ -310,21 +347,31 @@ const App: React.FC = () => {
                         </div>
                     </div>
 
+                    <div className="flex items-center gap-4">
+                        <button
+                            onClick={handleGenerate}
+                            disabled={isLoading || isVarying}
+                            className="flex-grow bg-gradient-to-r from-cyan-500 to-teal-600 hover:from-cyan-600 hover:to-teal-700 text-white font-bold py-3 px-4 rounded-lg shadow-lg transform hover:scale-105 transition-all duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 flex items-center justify-center"
+                        >
+                            {isLoading ? (
+                                <>
+                                    <SpinnerIcon className="w-5 h-5 mr-3" />
+                                    Đang tạo...
+                                </>
+                            ) : (
+                                'Tạo nhân vật'
+                            )}
+                        </button>
+                        <button
+                            onClick={handleReset}
+                            disabled={isLoading || isVarying}
+                            className="p-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg shadow-lg transform hover:scale-105 transition-all duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
+                            aria-label="Đặt lại tất cả cài đặt"
+                        >
+                            <ResetIcon className="w-6 h-6" />
+                        </button>
+                    </div>
 
-                    <button
-                        onClick={handleGenerate}
-                        disabled={isLoading}
-                        className="w-full bg-gradient-to-r from-cyan-500 to-teal-600 hover:from-cyan-600 hover:to-teal-700 text-white font-bold py-3 px-4 rounded-lg shadow-lg transform hover:scale-105 transition-all duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 flex items-center justify-center"
-                    >
-                        {isLoading ? (
-                            <>
-                                <SpinnerIcon className="w-5 h-5 mr-3" />
-                                Đang tạo...
-                            </>
-                        ) : (
-                            'Tạo nhân vật'
-                        )}
-                    </button>
                     {error && <p className="text-red-400 mt-4 text-center">{error}</p>}
                 </div>
 
@@ -350,6 +397,17 @@ const App: React.FC = () => {
                                 <GeneratedImage title="Chân dung" imageUrl={generatedPortrait} onZoom={setZoomedImageUrl} onDownload={() => downloadImage(generatedPortrait, 'portrait.png')} isLoading={isLoading} />
                                 <GeneratedImage title="Bản vẽ trực giao" imageUrl={generatedOrthoSheet} onZoom={setZoomedImageUrl} onDownload={() => downloadImage(generatedOrthoSheet, 'ortho-sheet.png')} isLoading={isLoading} />
                                 <GeneratedImage title="Bản vẽ phối cảnh" imageUrl={generatedAngledSheet} onZoom={setZoomedImageUrl} onDownload={() => downloadImage(generatedAngledSheet, 'angled-sheet.png')} isLoading={isLoading} />
+                            </div>
+
+                            <div className="md:col-span-2 lg:col-span-3">
+                                {generatedTurntableViews && generatedTurntableViews.length > 0 && (
+                                     <TurntableGallery
+                                        title="Góc nhìn 3D"
+                                        views={generatedTurntableViews}
+                                        onZoom={setZoomedImageUrl}
+                                        isGenerating={isLoading}
+                                    />
+                                )}
                             </div>
 
                              <div className="bg-gray-800 p-4 rounded-lg shadow-inner mt-6">
@@ -402,7 +460,7 @@ const GeneratedImage: React.FC<GeneratedImageProps> = ({ title, imageUrl, onZoom
     return (
         <div className="bg-gray-900/50 p-3 rounded-lg shadow-md flex flex-col">
             <h4 className="text-md font-semibold text-cyan-400 mb-2 text-center">{title}</h4>
-            <div className="relative aspect-auto flex-grow w-full bg-gray-900 rounded-md overflow-hidden group">
+            <div className="relative aspect-square flex-grow w-full bg-gray-900 rounded-md overflow-hidden group">
                 {isLoading ? (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/50">
                         <SpinnerIcon className="w-10 h-10 text-cyan-400" />
@@ -413,10 +471,10 @@ const GeneratedImage: React.FC<GeneratedImageProps> = ({ title, imageUrl, onZoom
                         <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                             <div className="flex space-x-4">
                                 <button onClick={() => onZoom(imageUrl)} className="text-white hover:text-cyan-400 transition-colors p-2 bg-black/50 rounded-full" aria-label="Phóng to">
-                                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" /></svg>
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" /></svg>
                                 </button>
                                 <button onClick={onDownload} className="text-white hover:text-cyan-400 transition-colors p-2 bg-black/50 rounded-full" aria-label="Tải xuống">
-                                    <DownloadIcon className="w-6 h-6" />
+                                    <DownloadIcon className="w-5 h-5" />
                                 </button>
                             </div>
                         </div>
