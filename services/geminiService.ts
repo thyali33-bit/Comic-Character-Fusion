@@ -44,6 +44,23 @@ const getFinalCheck = (value: number): string => {
     return "Before outputting, check that the style incorporates some elements from your analysis of the reference image.";
 }
 
+const getQualityPrompt = (quality: string): string => {
+    if (quality === 'hd') {
+        return `
+          **QUALITY MANDATE (HD):**
+          - Generate an ultra-high-quality, print-resolution image.
+          - Pay meticulous attention to detail, ensuring clean, crisp linework.
+          - Employ sophisticated shading, lighting, and texturing to create depth and realism.
+          - The final output must be of a professional, portfolio-grade finish.
+        `;
+    }
+    return `
+      **QUALITY MANDATE (Standard):**
+      - Generate a high-quality image suitable for web and digital display.
+      - Ensure the image is clear, well-defined, and visually appealing.
+    `;
+};
+
 
 export const generateCharacterAssets = async (
   faceImage: string | null,
@@ -55,7 +72,8 @@ export const generateCharacterAssets = async (
   angledPose: string,
   facialExpression: string,
   facialExpressionIntensity: number,
-  seed: number | null
+  seed: number | null,
+  quality: string
 ): Promise<{ portrait: string; orthoSheet: string; angledSheet: string }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
   try {
@@ -160,14 +178,16 @@ export const generateCharacterAssets = async (
       ? `You MUST also include the following accessories from the Clothing Reference (Image ${clothingInputIndex + 1}): ${accessoriesToSave.join(', ')}.`
       : "Do not include any accessories like jewelry unless they are integral to the clothing itself.";
     
-    
+    const qualityPrompt = getQualityPrompt(quality);
     const portraitPrompt = `
-      **PRIMARY OBJECTIVE:** Create a character portrait by fusing three distinct elements from three source images.
+      **PRIMARY OBJECTIVE:** Create a character portrait by fusing elements from the source images.
 
       **RULE ZERO: ABSOLUTE CONTENT SEPARATION (NON-NEGOTIABLE)**
       The most important rule is that the **Style Reference** image is for **STYLE ONLY**. The person, clothing, and objects within the Style Reference image are **STRICTLY FORBIDDEN** from appearing in the final portrait. Any "content bleed" from the Style Reference is a total failure of the prompt. You will ONLY analyze its artistic technique.
 
       You are an expert comic book character designer. Your task is to generate a high-quality character portrait by synthesizing instructions from the provided text and images. The images are provided in a numbered sequence.
+
+      ${qualityPrompt}
 
       **Input Instructions & VERY STRICT Rules:**
 
@@ -176,12 +196,11 @@ export const generateCharacterAssets = async (
       ${clothingPromptSection}
       ${stylePromptSection}
       
-      **Output Requirements:**
-      - Generate a single, high-quality, square portrait image.
-      - The portrait MUST be a close-up "bust shot," showing ONLY the character's head, shoulders, and upper torso.
-      - **NEGATIVE CONSTRAINT (CRITICAL): The image MUST NOT show any hands, arms, or any part of the body below the chest.** Any visible hands will result in a failure.
-      - The final image must be a perfect synthesis of all instructions.
-      - The background MUST be a simple, neutral medium gray (#808080).
+      **CRITICAL OUTPUT FORMATTING MANDATE (NON-NEGOTIABLE):**
+      - **Aspect Ratio:** The final output image's aspect ratio **MUST BE EXACTLY 1:1 (square, 1024x1024px)**. This is a top-priority, absolute rule. **DO NOT** infer the aspect ratio from the input images; you MUST obey this instruction.
+      - **Composition:** The portrait MUST be a close-up "bust shot," showing ONLY the character's head, shoulders, and upper torso. The character should be centered.
+      - **Background:** The background MUST be a simple, neutral medium gray (#808080).
+      - **Negative Constraint (Limbs):** The image MUST NOT show any hands, arms, or any part of the body below the chest. This is a critical rule.
 
       **Final Check:** ${finalStyleCheck} Before outputting, re-read RULE ZERO. Have you included any clothing or character features from the Style Reference? If so, you must start over. Then, confirm you have followed all other mandates according to the influence strengths provided.
     `;
@@ -220,11 +239,20 @@ export const generateCharacterAssets = async (
     if (clothingImage) {
         sheetParts.push(fileToGenerativePart(clothingImage));
         consistencyMandate = `
-          **Primary Directive: Strict Asset Deconstruction & Reconstruction Algorithm**
-          You are provided two images with distinct, non-overlapping roles. Your task is to deconstruct them and reconstruct a new image. Any blending of identities is a critical failure.
+          **THE GOLDEN RULE (ABSOLUTE & UNBREAKABLE):**
+          The head (face, hair, expression) from **Image Asset 1 ("THE HEAD")** is SACRED. The head from **Image Asset 2 ("THE OUTFIT")** is FORBIDDEN.
+          You MUST **copy the head from Image Asset 1** and **paste it onto the body wearing the outfit from Image Asset 2.**
+          Any drawing that contains the face from Image Asset 2 is an **IMMEDIATE and CATASTROPHIC FAILURE.** This is the most important rule.
 
           - **Image Asset 1 ("THE HEAD"):** The first input image provided. This is the **ABSOLUTE, UNMODIFIABLE** source for the character's head. This includes face, hair, expression, and the art style of the head itself.
           - **Image Asset 2 ("THE OUTFIT"):** The second input image provided. This is the **ONLY** source for the character's full-body clothing.
+
+          **ZERO DEVIATION FACIAL POLICY (UNBREAKABLE LAW):**
+          The character's facial identity is **LOCKED**. When you draw the character in the new poses, the face **MUST BE A PERFECT, IDENTICAL REPLICA** of the face from **Image Asset 1 ("THE HEAD")**.
+          - **DO NOT** change the facial expression.
+          - **DO NOT** alter the shape of the eyes, nose, or mouth.
+          - **DO NOT** change the hairstyle.
+          - **Think of it as a 3D model where the head is a rigid, unchangeable object.** You are only moving the camera and the body. Any modification to the facial features is a critical failure.
 
           **Execution Algorithm (MANDATORY):**
 
@@ -236,8 +264,6 @@ export const generateCharacterAssets = async (
           **Phase 2: Reconstruction (Drawing Process)**
           1.  **Draw Body + Outfit:** Draw the character's body in the required pose. Dress this body using **only** the "outfit asset" you identified in Phase 1. The body proportions should match the character in the "THE OUTFIT" image, but rendered in the art style of "THE HEAD" image.
           2.  **Copy-Paste Head:** Take the complete, unmodified "head asset" from Phase 1 and attach it to the body you just drew. It must be a perfect, 1:1 replica of the head from Image Asset 1.
-
-          **ABSOLUTE LAW:** The final character's head in your output drawing MUST be visually identical to the head in Image Asset 1. The final character's outfit MUST be visually identical to the outfit in Image Asset 2. There is no middle ground.
           
           **CLOTHING INSTRUCTIONS:**
           - The **ENTIRE OUTFIT** (top, bottom, shoes, etc.) MUST be taken **EXCLUSIVELY** from **Image Asset 2 ("THE OUTFIT")**.
@@ -250,11 +276,7 @@ export const generateCharacterAssets = async (
 
             **YOUR CRITICAL MISSION: THE "FULL BODY TRACING" PROTOCOL**
             - **THE LAW:** The character's **ENTIRE BEING**—face, head, hair, clothing, body shape, and art style—in **EVERY SINGLE DRAWING YOU MAKE** must be an **EXACT, FLAWLESS, 1:1 REPLICATION** of the "Generated Character Portrait".
-            - **CHECKLIST OF UNCHANGEABLE TRAITS (MUST MATCH 100%):**
-                - **Face:** Facial Structure, Eyes, Nose, Mouth.
-                - **Identity:** Hairstyle, Hair Color, Skin Tone.
-                - **Outfit:** All clothing items and accessories shown.
-                - **Style:** The complete Art Style (line art, coloring, shading).
+            - **ZERO DEVIATION FACIAL POLICY:** The character's facial identity is **LOCKED**. When you re-draw the character, the face **MUST BE A PERFECT, IDENTICAL REPLICA** of the face from the portrait. **DO NOT** change the facial expression, alter the shape of any facial features, or change the hairstyle. Think of the head as a rigid, unchangeable 3D object. Any modification to the face is a critical failure.
             - **MENTAL MODEL:** Your only job is to re-pose and redraw the exact same character from the "Generated Character Portrait" from different camera angles. **NO ARTISTIC INTERPRETATION OR DEVIATION IS ALLOWED.** It must be a perfect copy.
             - **NEGATIVE CONSTRAINT:** Do not invent new clothing details, change colors, or alter the style in any way.
         `;
@@ -287,8 +309,10 @@ export const generateCharacterAssets = async (
       - **Structure:** One image file, divided into four equal quadrants (a 2x2 grid).
       - **Content:** EXACTLY FOUR drawings of the character, one in each quadrant.
       - **Background:** The entire image, including all quadrants, MUST have a uniform medium gray (#808080) background.
+      - **Aspect Ratio:** The final output image's aspect ratio **MUST BE EXACTLY 9:16 (tall portrait, 736x1408px)**. This is a non-negotiable rule.
       - **FAILURE to produce a perfect 4-view, 2x2 grid means you have FAILED the entire request.** This format rule is more important than any other instruction.
 
+      ${qualityPrompt}
       ${consistencyMandate}
       
       **Content of the Grid (ABSOLUTE & STRICT MAPPING):**
@@ -299,7 +323,10 @@ export const generateCharacterAssets = async (
       - **QUADRANT: Bottom-Left** -> **LABEL:** "Left Side View" -> **CONTENT:** Perfect 90-degree side view from the character's LEFT, looking left.
       - **QUADRANT: Bottom-Right** -> **LABEL:** "Right Side View" -> **CONTENT:** Perfect 90-degree side view from the character's RIGHT, looking right.
       
-      **Final Check:** Verify: 1. Single image? YES. 2. 2x2 grid? YES. 3. Exactly four views with correct content/quadrant? YES. 4. Head and face are a PERFECT match to Image Asset 1 ("THE HEAD")? YES. Proceed only if all are YES.
+      **Final Sanity Check (MANDATORY):**
+      Before you output the image, ask yourself one question: "Does the face in ANY of my four drawings look like the face from Image Asset 2 (THE OUTFIT)?"
+      - If the answer is YES, you have failed. **Delete your work and start over, following the Golden Rule.**
+      - If the answer is NO, and the faces are all perfect copies of Image Asset 1 (THE HEAD), then you may proceed.
     `;
     
     let angledPoseInstruction: string;
@@ -332,23 +359,29 @@ export const generateCharacterAssets = async (
       - Your final output MUST be a single image file, structured as a 2x2 grid.
       - This grid MUST contain EXACTLY FOUR (4) drawings of the character.
       - The background for the entire grid image MUST be a uniform medium gray (#808080).
+      - **Aspect Ratio:** The final output image's aspect ratio **MUST BE EXACTLY 9:16 (tall portrait, 736x1408px)**. This is a non-negotiable rule.
+      - **CRITICAL NEGATIVE CONSTRAINT:** DO NOT render, draw, or write any text or labels **INSIDE** the image quadrants. The text labels specified below must appear cleanly below each corresponding drawing, not as part of the artwork.
       - **Failure to produce a 4-view, 2x2 grid is a complete failure of the task.**
 
+      ${qualityPrompt}
       ${consistencyMandate}
 
       **Pose Generation (MANDATORY RULES):**
       - ${angledPoseInstruction}
 
-      **Content of the Grid (Technical Specifications):**
-      You will generate four views in the grid, each with a specific camera angle and a legible text label below it.
+      **Content of the Grid (ABSOLUTE & STRICT MAPPING):**
+      You MUST draw the character in the following four views, placed in the EXACT specified quadrant. Each quadrant must contain a unique pose and camera angle as described. Each view MUST have the specified text label placed cleanly below it.
 
-      1.  **Top-Left (Label: "45° Front-Left"):** A 45-degree angle view from the character's front-left. The pose MUST strongly emphasize their LEFT side.
-      2.  **Top-Right (Label: "45° Front-Right"):** A 45-degree angle view from the character's front-right. This pose MUST strongly emphasize their RIGHT side and be distinct from the left view.
-      3.  **Bottom-Left (Label: "High-Angle View"):** A "bird's-eye view", looking down at the character from a steep high angle.
-      4.  **Bottom-Right (Label: "Low-Angle View"):** A "worm's-eye view", looking up at the character from a steep low angle to create a heroic shot.
+      - **QUADRANT: Top-Left** -> **LABEL:** "45° Front-Left" -> **CONTENT:** A dynamic pose viewed from a 45-degree angle from the character's front-left. The character's LEFT side should be most prominent.
+      - **QUADRANT: Top-Right** -> **LABEL:** "45° Front-Right" -> **CONTENT:** A **completely different** dynamic pose viewed from a 45-degree angle from the character's front-right. The character's RIGHT side should be most prominent. This must NOT be a mirror image of the top-left view; it must be a unique pose.
+      - **QUADRANT: Bottom-Left** -> **LABEL:** "High-Angle View" -> **CONTENT:** A "bird's-eye view". The camera is positioned high above the character, looking down at them from a steep angle. The character MUST be drawn upright, not inverted or upside down.
+      - **QUADRANT: Bottom-Right** -> **LABEL:** "Low-Angle View" -> **CONTENT:** A "worm's-eye view". The camera is positioned very low, near the ground, looking up at the character to create a heroic, powerful, and imposing shot. The character's feet/legs will be closest to the camera.
 
 
-      **Final Check:** Verify: 1. Single image? YES. 2. 2x2 grid? YES. 3. Exactly four views? YES. 4. Head and face are a PERFECT match to Image Asset 1 ("THE HEAD")? YES. Proceed only if all are YES.
+      **Final Sanity Check (MANDATORY):**
+      Before you output the image, ask yourself one question: "Does the face in ANY of my four drawings look like the face from Image Asset 2 (THE OUTFIT)?"
+      - If the answer is YES, you have failed. **Delete your work and start over, following the Golden Rule.**
+      - If the answer is NO, and the faces are all perfect copies of Image Asset 1 (THE HEAD), then you may proceed.
     `;
 
     // STEP 2: Generate the sheets in parallel.
@@ -408,6 +441,9 @@ export const generateVariationAssets = async (
             generationConfig.seed = seed;
         }
 
+        const { clothingImage, accessories, orthoPose, angledPose, quality } = originalParams;
+        const qualityPrompt = getQualityPrompt(quality);
+
         // STEP 1: Generate the new, varied portrait.
         const variationDescription = getVariationDescription(variationStrength);
         const variationPrompt = `
@@ -417,12 +453,14 @@ export const generateVariationAssets = async (
           **Input Image:** The provided image is the original character portrait.
           
           **Variation Mandate (${variationStrength}%):** ${variationDescription}
+          
+          ${qualityPrompt}
 
-          **Output Requirements:**
-          - Generate a single, high-quality, square portrait image that is a variation of the input.
-          - The portrait MUST be a close-up "bust shot," showing ONLY the character's head, shoulders, and upper torso.
-          - **NEGATIVE CONSTRAINT (CRITICAL): The image MUST NOT show any hands, arms, or any part of the body below the chest.** Any visible hands will result in a failure.
-          - The background MUST be a simple, neutral medium gray (#808080).
+          **CRITICAL OUTPUT FORMATTING MANDATE (NON-NEGOTIABLE):**
+          - **Aspect Ratio:** The final output image's aspect ratio **MUST BE EXACTLY 1:1 (square, 1024x1024px)**. This is a top-priority, absolute rule. **DO NOT** infer the aspect ratio from the input image; you MUST obey this instruction.
+          - **Composition:** The portrait MUST be a close-up "bust shot," showing ONLY the character's head, shoulders, and upper torso.
+          - **Background:** The background MUST be a simple, neutral medium gray (#808080).
+          - **Negative Constraint (Limbs):** The image MUST NOT show any hands, arms, or any part of the body below the chest.
         `;
         
         const basePortraitPart = fileToGenerativePart(basePortraitImage);
@@ -447,8 +485,7 @@ export const generateVariationAssets = async (
         };
 
         // STEP 2: Generate the sheets based on the NEW portrait, using original settings.
-        const { clothingImage, accessories, orthoPose, angledPose } = originalParams;
-
+        
         const accessoriesToSave = Object.entries(accessories)
             .filter(([, value]) => value)
             .map(([key]) => {
@@ -470,24 +507,31 @@ export const generateVariationAssets = async (
         if (clothingImage) {
             sheetParts.push(fileToGenerativePart(clothingImage));
             consistencyMandate = `
-              **Primary Directive: Strict Asset Deconstruction & Reconstruction Algorithm**
-              You are provided two images with distinct, non-overlapping roles. Your task is to deconstruct them and reconstruct a new image. Any blending of identities is a critical failure.
+              **THE GOLDEN RULE (ABSOLUTE & UNBREAKABLE):**
+              The head (face, hair, expression) from **Image Asset 1 ("THE HEAD")** is SACRED. The head from **Image Asset 2 ("THE OUTFIT")** is FORBIDDEN.
+              You MUST **copy the head from Image Asset 1** and **paste it onto the body wearing the outfit from Image Asset 2.**
+              Any drawing that contains the face from Image Asset 2 is an **IMMEDIATE and CATASTROPHIC FAILURE.** This is the most important rule.
     
-              - **Image Asset 1 ("THE HEAD"):** The first input image provided. This is the **ABSOLUTE, UNMODIFIABLE** source for the character's head. This includes face, hair, expression, and the art style of the head itself.
+              - **Image Asset 1 ("THE HEAD"):** The first input image provided. This is the **ABSOLUTE, UNMODIFIABLE** source for the character's head.
               - **Image Asset 2 ("THE OUTFIT"):** The second input image provided. This is the **ONLY** source for the character's full-body clothing.
     
+              **ZERO DEVIATION FACIAL POLICY (UNBREAKABLE LAW):**
+              The character's facial identity is **LOCKED**. When you draw the character in the new poses, the face **MUST BE A PERFECT, IDENTICAL REPLICA** of the face from **Image Asset 1 ("THE HEAD")**.
+              - **DO NOT** change the facial expression.
+              - **DO NOT** alter the shape of the eyes, nose, or mouth.
+              - **DO NOT** change the hairstyle.
+              - **Think of it as a 3D model where the head is a rigid, unchangeable object.** You are only moving the camera and the body. Any modification to the facial features is a critical failure.
+
               **Execution Algorithm (MANDATORY):**
     
               **Phase 1: Deconstruction (Mental Analysis - DO THIS FIRST)**
-              1.  **Analyze "THE HEAD":** Look at Image Asset 1. Mentally isolate the entire head. Note its hairstyle, face shape, features, and expression. This is the "head asset".
-              2.  **Analyze "THE OUTFIT":** Look at Image Asset 2. Ignore the person wearing the clothes. Your only goal is to identify the full outfit: shirt, pants, shoes, accessories, etc. This is the "outfit asset".
+              1.  **Analyze "THE HEAD":** Look at Image Asset 1. Isolate the entire head. This is the "head asset".
+              2.  **Analyze "THE OUTFIT":** Look at Image Asset 2. Isolate the full outfit. This is the "outfit asset".
               3.  **Confirm Rejection:** Verbally confirm to yourself that the head from "THE OUTFIT" image is **IRRELEVANT** and **MUST BE DISCARDED**.
     
               **Phase 2: Reconstruction (Drawing Process)**
-              1.  **Draw Body + Outfit:** Draw the character's body in the required pose. Dress this body using **only** the "outfit asset" you identified in Phase 1. The body proportions should match the character in the "THE OUTFIT" image, but rendered in the art style of "THE HEAD" image.
-              2.  **Copy-Paste Head:** Take the complete, unmodified "head asset" from Phase 1 and attach it to the body you just drew. It must be a perfect, 1:1 replica of the head from Image Asset 1.
-    
-              **ABSOLUTE LAW:** The final character's head in your output drawing MUST be visually identical to the head in Image Asset 1. The final character's outfit MUST be visually identical to the outfit in Image Asset 2. There is no middle ground.
+              1.  **Draw Body + Outfit:** Draw the character's body in the required pose, dressed in the "outfit asset".
+              2.  **Copy-Paste Head:** Take the complete, unmodified "head asset" and attach it to the body.
               
               **CLOTHING INSTRUCTIONS:**
               - The **ENTIRE OUTFIT** (top, bottom, shoes, etc.) MUST be taken **EXCLUSIVELY** from **Image Asset 2 ("THE OUTFIT")**.
@@ -496,9 +540,13 @@ export const generateVariationAssets = async (
         } else {
             consistencyMandate = `
                 **LAW OF FACIAL IDENTITY (ABSOLUTE & UNBREAKABLE):**
-                You have been provided with one image, the "Generated Character Portrait". This image is the **UNALTERABLE, CANONICAL, AND DEFINITIVE** source for the character's **ENTIRE APPEARANCE AND IDENTITY**.
+                You have been provided with one image, the "Generated Character Portrait". This is the **UNALTERABLE, CANONICAL, AND DEFINITIVE** source for the character's **ENTIRE APPEARANCE AND IDENTITY**.
+                
                 **YOUR CRITICAL MISSION: THE "FULL BODY TRACING" PROTOCOL**
-                The character's **ENTIRE BEING**—face, head, hair, clothing, body shape, and art style—in **EVERY SINGLE DRAWING YOU MAKE** must be an **EXACT, FLAWLESS, 1:1 REPLICATION** of the "Generated Character Portrait". Your only job is to re-pose and redraw the exact same character from different camera angles. NO DEVIATION IS ALLOWED.
+                - **THE LAW:** The character's **ENTIRE BEING**—face, head, hair, clothing, body shape, and art style—in **EVERY SINGLE DRAWING YOU MAKE** must be an **EXACT, FLAWLESS, 1:1 REPLICATION** of the "Generated Character Portrait".
+                - **ZERO DEVIATION FACIAL POLICY:** The character's facial identity is **LOCKED**. When you re-draw the character, the face **MUST BE A PERFECT, IDENTICAL REPLICA** of the face from the portrait. **DO NOT** change the facial expression, alter the shape of any facial features, or change the hairstyle. Think of the head as a rigid, unchangeable 3D object. Any modification to the face is a critical failure.
+                - **MENTAL MODEL:** Your only job is to re-pose and redraw the exact same character from different camera angles. **NO ARTISTIC INTERPRETATION OR DEVIATION IS ALLOWED.** It must be a perfect copy.
+                - **NEGATIVE CONSTRAINT:** Do not invent new clothing details, change colors, or alter the style in any way.
             `;
         }
 
@@ -513,14 +561,18 @@ export const generateVariationAssets = async (
 
         const orthoSheetPrompt = `
           You are an expert comic book character designer. Generate a character sheet with orthographic views.
-          **CRITICAL OUTPUT FORMATTING MANDATE:** Produce a SINGLE IMAGE as a 2x2 GRID with a uniform medium gray (#808080) background. Failure to produce a perfect 4-view, 2x2 grid is a failure of the entire request.
+          **CRITICAL OUTPUT FORMATTING MANDATE:** Produce a SINGLE IMAGE as a 2x2 GRID with a uniform medium gray (#808080) background. The aspect ratio **MUST BE EXACTLY 9:16 (tall portrait, 736x1408px)**. Failure to produce a perfect 4-view, 2x2 grid is a failure of the entire request.
+          ${qualityPrompt}
           ${consistencyMandate}
           **Grid Content:** Draw the character ${orthoPoseInstruction} for all views. The pose must be identical across all views; only the camera angle changes. Each view MUST have the specified label below it.
           - **Top-Left:** "Front View" (Direct front)
           - **Top-Right:** "Back View" (Direct back)
           - **Bottom-Left:** "Left Side View" (90-degree side from character's LEFT)
           - **Bottom-Right:** "Right Side View" (90-degree side from character's RIGHT)
-          **Final Check:** 1. Single image? YES. 2. 2x2 grid? YES. 3. Four views correct? YES. 4. Head and face are a PERFECT match to Image Asset 1 ("THE HEAD")? YES. Proceed only if all are YES.
+          **Final Sanity Check (MANDATORY):**
+          Before you output the image, ask yourself one question: "Does the face in ANY of my four drawings look like the face from Image Asset 2 (THE OUTFIT)?"
+          - If the answer is YES, you have failed. **Delete your work and start over, following the Golden Rule.**
+          - If the answer is NO, and the faces are all perfect copies of Image Asset 1 (THE HEAD), then you may proceed.
         `;
         
         let angledPoseInstruction: string;
@@ -537,16 +589,34 @@ export const generateVariationAssets = async (
         }
 
         const angledSheetPrompt = `
-          You are an expert comic book character designer. Create a sheet of dynamic angled views.
-          **CRITICAL OUTPUT FORMATTING MANDATE:** Your final output MUST be a single image file, structured as a 2x2 grid with a uniform medium gray (#808080) background, containing EXACTLY FOUR (4) drawings.
+          You are an expert comic book character designer tasked with creating a sheet of dynamic angled views.
+
+          **CRITICAL OUTPUT FORMATTING MANDATE (NON-NEGOTIABLE):**
+          - Your final output MUST be a single image file, structured as a 2x2 grid.
+          - This grid MUST contain EXACTLY FOUR (4) drawings of the character.
+          - The background for the entire grid image MUST be a uniform medium gray (#808080).
+          - **Aspect Ratio:** The final output image's aspect ratio **MUST BE EXACTLY 9:16 (tall portrait, 736x1408px)**. This is a non-negotiable rule.
+          - **CRITICAL NEGATIVE CONSTRAINT:** DO NOT render, draw, or write any text or labels **INSIDE** the image quadrants. The text labels specified below must appear cleanly below each corresponding drawing, not as part of the artwork.
+          - **Failure to produce a 4-view, 2x2 grid is a complete failure of the task.**
+    
+          ${qualityPrompt}
           ${consistencyMandate}
-          **Pose Generation:** ${angledPoseInstruction}
-          **Grid Content:**
-          1.  **Top-Left (Label: "45° Front-Left"):** 45-degree view from character's front-left. Emphasize their LEFT side.
-          2.  **Top-Right (Label: "45° Front-Right"):** 45-degree view from character's front-right. Emphasize their RIGHT side.
-          3.  **Bottom-Left (Label: "High-Angle View"):** "Bird's-eye view", looking down at the character.
-          4.  **Bottom-Right (Label: "Low-Angle View"):** "Worm's-eye view", looking up at the character.
-          **Final Check:** 1. Single image? YES. 2. 2x2 grid? YES. 3. Four views? YES. 4. Head and face are a PERFECT match to Image Asset 1 ("THE HEAD")? YES. Proceed only if all are YES.
+    
+          **Pose Generation (MANDATORY RULES):**
+          - ${angledPoseInstruction}
+    
+          **Content of the Grid (ABSOLUTE & STRICT MAPPING):**
+          You MUST draw the character in the following four views, placed in the EXACT specified quadrant. Each quadrant must contain a unique pose and camera angle as described. Each view MUST have the specified text label placed cleanly below it.
+    
+          - **QUADRANT: Top-Left** -> **LABEL:** "45° Front-Left" -> **CONTENT:** A dynamic pose viewed from a 45-degree angle from the character's front-left. The character's LEFT side should be most prominent.
+          - **QUADRANT: Top-Right** -> **LABEL:** "45° Front-Right" -> **CONTENT:** A **completely different** dynamic pose viewed from a 45-degree angle from the character's front-right. The character's RIGHT side should be most prominent. This must NOT be a mirror image of the top-left view; it must be a unique pose.
+          - **QUADRANT: Bottom-Left** -> **LABEL:** "High-Angle View" -> **CONTENT:** A "bird's-eye view". The camera is positioned high above the character, looking down at them from a steep angle. The character MUST be drawn upright, not inverted or upside down.
+          - **QUADRANT: Bottom-Right** -> **LABEL:** "Low-Angle View" -> **CONTENT:** A "worm's-eye view". The camera is positioned very low, near the ground, looking up at the character to create a heroic, powerful, and imposing shot. The character's feet/legs will be closest to the camera.
+          
+          **Final Sanity Check (MANDATORY):**
+          Before you output the image, ask yourself one question: "Does the face in ANY of my four drawings look like the face from Image Asset 2 (THE OUTFIT)?"
+          - If the answer is YES, you have failed. **Delete your work and start over, following the Golden Rule.**
+          - If the answer is NO, and the faces are all perfect copies of Image Asset 1 (THE HEAD), then you may proceed.
         `;
 
         const orthoSheetPromise = ai.models.generateContent({

@@ -22,4 +22,5 @@ export interface GenerationParams {
   facialExpression: string;
   facialExpressionIntensity: number;
   seed: number | null;
+  quality: string;
 }
