@@ -162,6 +162,11 @@ export const generateCharacterAssets = async (
     
     
     const portraitPrompt = `
+      **PRIMARY OBJECTIVE:** Create a character portrait by fusing three distinct elements from three source images.
+
+      **RULE ZERO: ABSOLUTE CONTENT SEPARATION (NON-NEGOTIABLE)**
+      The most important rule is that the **Style Reference** image is for **STYLE ONLY**. The person, clothing, and objects within the Style Reference image are **STRICTLY FORBIDDEN** from appearing in the final portrait. Any "content bleed" from the Style Reference is a total failure of the prompt. You will ONLY analyze its artistic technique.
+
       You are an expert comic book character designer. Your task is to generate a high-quality character portrait by synthesizing instructions from the provided text and images. The images are provided in a numbered sequence.
 
       **Input Instructions & VERY STRICT Rules:**
@@ -178,7 +183,7 @@ export const generateCharacterAssets = async (
       - The final image must be a perfect synthesis of all instructions.
       - The background MUST be a simple, neutral medium gray (#808080).
 
-      **Final Check:** ${finalStyleCheck} Before outputting, confirm you have followed all mandates according to the influence strengths provided.
+      **Final Check:** ${finalStyleCheck} Before outputting, re-read RULE ZERO. Have you included any clothing or character features from the Style Reference? If so, you must start over. Then, confirm you have followed all other mandates according to the influence strengths provided.
     `;
     
     const generationConfig: { responseModalities: Modality[], seed?: number } = {
@@ -215,23 +220,27 @@ export const generateCharacterAssets = async (
     if (clothingImage) {
         sheetParts.push(fileToGenerativePart(clothingImage));
         consistencyMandate = `
-          **Core Directive: Asset Separation and Identity Lock**
-          You have been provided with two input images for this task. Their roles are fixed and must not be confused.
-          - **INPUT 1: The Master Portrait.** This image is the **single source of truth** for the character's head. The face, hair, expression, and the art style of the head are locked and **MUST be duplicated exactly** in every drawing you produce.
-          - **INPUT 2: The Clothing Source.** This image is the **single source of truth** for the character's clothing and full-body outfit.
+          **Primary Directive: Strict Asset Deconstruction & Reconstruction Algorithm**
+          You are provided two images with distinct, non-overlapping roles. Your task is to deconstruct them and reconstruct a new image. Any blending of identities is a critical failure.
 
-          **Execution Protocol (Non-Negotiable):**
-          For every character view you must draw, follow these steps:
-          1.  **Analyze Clothing:** Refer ONLY to **INPUT 2 (The Clothing Source)** to understand the complete outfit (shirt, pants, shoes, etc.).
-          2.  **Draw Body & Clothing:** Draw the character's body in the required pose, dressed in the complete outfit from Step 1.
-          3.  **Isolate Master Head:** Refer ONLY to **INPUT 1 (The Master Portrait)**. Mentally isolate the character's entire head.
-          4.  **Attach Master Head:** Attach the identical, unchanged head from Step 3 onto the body from Step 2.
+          - **Image Asset 1 ("THE HEAD"):** The first input image provided. This is the **ABSOLUTE, UNMODIFIABLE** source for the character's head. This includes face, hair, expression, and the art style of the head itself.
+          - **Image Asset 2 ("THE OUTFIT"):** The second input image provided. This is the **ONLY** source for the character's full-body clothing.
 
-          **CRITICAL FAILURE CONDITION:** If the face in your output does not look like a perfect copy of the face from **INPUT 1**, you have failed. If you use the face, head, or hair from **INPUT 2**, you have failed. Your primary function is to maintain character consistency by locking the head's appearance to **INPUT 1**.
+          **Execution Algorithm (MANDATORY):**
 
+          **Phase 1: Deconstruction (Mental Analysis - DO THIS FIRST)**
+          1.  **Analyze "THE HEAD":** Look at Image Asset 1. Mentally isolate the entire head. Note its hairstyle, face shape, features, and expression. This is the "head asset".
+          2.  **Analyze "THE OUTFIT":** Look at Image Asset 2. Ignore the person wearing the clothes. Your only goal is to identify the full outfit: shirt, pants, shoes, accessories, etc. This is the "outfit asset".
+          3.  **Confirm Rejection:** Verbally confirm to yourself that the head from "THE OUTFIT" image is **IRRELEVANT** and **MUST BE DISCARDED**.
+
+          **Phase 2: Reconstruction (Drawing Process)**
+          1.  **Draw Body + Outfit:** Draw the character's body in the required pose. Dress this body using **only** the "outfit asset" you identified in Phase 1. The body proportions should match the character in the "THE OUTFIT" image, but rendered in the art style of "THE HEAD" image.
+          2.  **Copy-Paste Head:** Take the complete, unmodified "head asset" from Phase 1 and attach it to the body you just drew. It must be a perfect, 1:1 replica of the head from Image Asset 1.
+
+          **ABSOLUTE LAW:** The final character's head in your output drawing MUST be visually identical to the head in Image Asset 1. The final character's outfit MUST be visually identical to the outfit in Image Asset 2. There is no middle ground.
+          
           **CLOTHING INSTRUCTIONS:**
-          - The **ENTIRE OUTFIT** (top, bottom, shoes, etc.) MUST be taken **EXCLUSIVELY** from **INPUT 2 ("The Clothing Source")**.
-          - The character's body proportions and build should be based on INPUT 2 but rendered in the style defined by INPUT 1.
+          - The **ENTIRE OUTFIT** (top, bottom, shoes, etc.) MUST be taken **EXCLUSIVELY** from **Image Asset 2 ("THE OUTFIT")**.
           - **Accessories:** ${accessoriesString}
         `;
     } else {
@@ -290,7 +299,7 @@ export const generateCharacterAssets = async (
       - **QUADRANT: Bottom-Left** -> **LABEL:** "Left Side View" -> **CONTENT:** Perfect 90-degree side view from the character's LEFT, looking left.
       - **QUADRANT: Bottom-Right** -> **LABEL:** "Right Side View" -> **CONTENT:** Perfect 90-degree side view from the character's RIGHT, looking right.
       
-      **Final Check:** Verify: 1. Single image? YES. 2. 2x2 grid? YES. 3. Exactly four views with correct content/quadrant? YES. 4. Head and face are a PERFECT match to INPUT 1 (The Master Portrait)? YES. Proceed only if all are YES.
+      **Final Check:** Verify: 1. Single image? YES. 2. 2x2 grid? YES. 3. Exactly four views with correct content/quadrant? YES. 4. Head and face are a PERFECT match to Image Asset 1 ("THE HEAD")? YES. Proceed only if all are YES.
     `;
     
     let angledPoseInstruction: string;
@@ -339,7 +348,7 @@ export const generateCharacterAssets = async (
       4.  **Bottom-Right (Label: "Low-Angle View"):** A "worm's-eye view", looking up at the character from a steep low angle to create a heroic shot.
 
 
-      **Final Check:** Verify: 1. Single image? YES. 2. 2x2 grid? YES. 3. Exactly four views? YES. 4. Head and face are a PERFECT match to INPUT 1 (The Master Portrait)? YES. Proceed only if all are YES.
+      **Final Check:** Verify: 1. Single image? YES. 2. 2x2 grid? YES. 3. Exactly four views? YES. 4. Head and face are a PERFECT match to Image Asset 1 ("THE HEAD")? YES. Proceed only if all are YES.
     `;
 
     // STEP 2: Generate the sheets in parallel.
@@ -461,23 +470,27 @@ export const generateVariationAssets = async (
         if (clothingImage) {
             sheetParts.push(fileToGenerativePart(clothingImage));
             consistencyMandate = `
-              **Core Directive: Asset Separation and Identity Lock**
-              You have been provided with two input images for this task. Their roles are fixed and must not be confused.
-              - **INPUT 1: The Master Portrait.** This image is the **single source of truth** for the character's head. The face, hair, expression, and the art style of the head are locked and **MUST be duplicated exactly** in every drawing you produce.
-              - **INPUT 2: The Clothing Source.** This image is the **single source of truth** for the character's clothing and full-body outfit.
+              **Primary Directive: Strict Asset Deconstruction & Reconstruction Algorithm**
+              You are provided two images with distinct, non-overlapping roles. Your task is to deconstruct them and reconstruct a new image. Any blending of identities is a critical failure.
     
-              **Execution Protocol (Non-Negotiable):**
-              For every character view you must draw, follow these steps:
-              1.  **Analyze Clothing:** Refer ONLY to **INPUT 2 (The Clothing Source)** to understand the complete outfit (shirt, pants, shoes, etc.).
-              2.  **Draw Body & Clothing:** Draw the character's body in the required pose, dressed in the complete outfit from Step 1.
-              3.  **Isolate Master Head:** Refer ONLY to **INPUT 1 (The Master Portrait)**. Mentally isolate the character's entire head.
-              4.  **Attach Master Head:** Attach the identical, unchanged head from Step 3 onto the body from Step 2.
+              - **Image Asset 1 ("THE HEAD"):** The first input image provided. This is the **ABSOLUTE, UNMODIFIABLE** source for the character's head. This includes face, hair, expression, and the art style of the head itself.
+              - **Image Asset 2 ("THE OUTFIT"):** The second input image provided. This is the **ONLY** source for the character's full-body clothing.
     
-              **CRITICAL FAILURE CONDITION:** If the face in your output does not look like a perfect copy of the face from **INPUT 1**, you have failed. If you use the face, head, or hair from **INPUT 2**, you have failed. Your primary function is to maintain character consistency by locking the head's appearance to **INPUT 1**.
+              **Execution Algorithm (MANDATORY):**
     
+              **Phase 1: Deconstruction (Mental Analysis - DO THIS FIRST)**
+              1.  **Analyze "THE HEAD":** Look at Image Asset 1. Mentally isolate the entire head. Note its hairstyle, face shape, features, and expression. This is the "head asset".
+              2.  **Analyze "THE OUTFIT":** Look at Image Asset 2. Ignore the person wearing the clothes. Your only goal is to identify the full outfit: shirt, pants, shoes, accessories, etc. This is the "outfit asset".
+              3.  **Confirm Rejection:** Verbally confirm to yourself that the head from "THE OUTFIT" image is **IRRELEVANT** and **MUST BE DISCARDED**.
+    
+              **Phase 2: Reconstruction (Drawing Process)**
+              1.  **Draw Body + Outfit:** Draw the character's body in the required pose. Dress this body using **only** the "outfit asset" you identified in Phase 1. The body proportions should match the character in the "THE OUTFIT" image, but rendered in the art style of "THE HEAD" image.
+              2.  **Copy-Paste Head:** Take the complete, unmodified "head asset" from Phase 1 and attach it to the body you just drew. It must be a perfect, 1:1 replica of the head from Image Asset 1.
+    
+              **ABSOLUTE LAW:** The final character's head in your output drawing MUST be visually identical to the head in Image Asset 1. The final character's outfit MUST be visually identical to the outfit in Image Asset 2. There is no middle ground.
+              
               **CLOTHING INSTRUCTIONS:**
-              - The **ENTIRE OUTFIT** (top, bottom, shoes, etc.) MUST be taken **EXCLUSIVELY** from **INPUT 2 ("The Clothing Source")**.
-              - The character's body proportions and build should be based on INPUT 2 but rendered in the style defined by INPUT 1.
+              - The **ENTIRE OUTFIT** (top, bottom, shoes, etc.) MUST be taken **EXCLUSIVELY** from **Image Asset 2 ("THE OUTFIT")**.
               - **Accessories:** ${accessoriesString}
             `;
         } else {
@@ -507,7 +520,7 @@ export const generateVariationAssets = async (
           - **Top-Right:** "Back View" (Direct back)
           - **Bottom-Left:** "Left Side View" (90-degree side from character's LEFT)
           - **Bottom-Right:** "Right Side View" (90-degree side from character's RIGHT)
-          **Final Check:** 1. Single image? YES. 2. 2x2 grid? YES. 3. Four views correct? YES. 4. Head and face are a PERFECT match to INPUT 1 (The Master Portrait)? YES. Proceed only if all are YES.
+          **Final Check:** 1. Single image? YES. 2. 2x2 grid? YES. 3. Four views correct? YES. 4. Head and face are a PERFECT match to Image Asset 1 ("THE HEAD")? YES. Proceed only if all are YES.
         `;
         
         let angledPoseInstruction: string;
@@ -533,7 +546,7 @@ export const generateVariationAssets = async (
           2.  **Top-Right (Label: "45° Front-Right"):** 45-degree view from character's front-right. Emphasize their RIGHT side.
           3.  **Bottom-Left (Label: "High-Angle View"):** "Bird's-eye view", looking down at the character.
           4.  **Bottom-Right (Label: "Low-Angle View"):** "Worm's-eye view", looking up at the character.
-          **Final Check:** 1. Single image? YES. 2. 2x2 grid? YES. 3. Four views? YES. 4. Head and face are a PERFECT match to INPUT 1 (The Master Portrait)? YES. Proceed only if all are YES.
+          **Final Check:** 1. Single image? YES. 2. 2x2 grid? YES. 3. Four views? YES. 4. Head and face are a PERFECT match to Image Asset 1 ("THE HEAD")? YES. Proceed only if all are YES.
         `;
 
         const orthoSheetPromise = ai.models.generateContent({
