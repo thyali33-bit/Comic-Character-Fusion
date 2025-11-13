@@ -1,7 +1,6 @@
-
 import React, { useState, useCallback } from 'react';
-import { Accessories, InfluenceValues } from './types';
-import { generateCharacterAssets } from './services/geminiService';
+import { Accessories, InfluenceValues, GenerationParams } from './types';
+import { generateCharacterAssets, generateVariationAssets } from './services/geminiService';
 import ImageInputBox from './components/ImageInputBox';
 import SpinnerIcon from './components/icons/SpinnerIcon';
 import ImageZoomModal from './components/ImageZoomModal';
@@ -156,7 +155,7 @@ const App: React.FC = () => {
     const [angledPose, setAngledPose] = useState<string>('random');
     const [facialExpression, setFacialExpression] = useState<string>('neutral');
     const [facialExpressionIntensity, setFacialExpressionIntensity] = useState<number>(75);
-
+    const [seed, setSeed] = useState<string>('');
     
     const [generatedAssets, setGeneratedAssets] = useState<{
         portrait: string | null;
@@ -164,9 +163,12 @@ const App: React.FC = () => {
         angledSheet: string | null;
     }>({ portrait: null, orthoSheet: null, angledSheet: null });
 
-    const [isLoading, setIsLoading] = useState<boolean>(false);
+    const [loadingAction, setLoadingAction] = useState<'generate' | 'variation' | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [zoomedImage, setZoomedImage] = useState<string | null>(null);
+
+    const [lastGenerationParams, setLastGenerationParams] = useState<GenerationParams | null>(null);
+    const [variationStrength, setVariationStrength] = useState<number>(50);
 
 
     const handleImageChange = (setter: React.Dispatch<React.SetStateAction<string | null>>) => async (file: File) => {
@@ -188,21 +190,51 @@ const App: React.FC = () => {
             return;
         }
 
-        setIsLoading(true);
+        setLoadingAction('generate');
         setError(null);
         setGeneratedAssets({ portrait: null, orthoSheet: null, angledSheet: null });
+        
+        const parsedSeed = seed && Number.isInteger(parseInt(seed, 10)) ? parseInt(seed, 10) : null;
+        const currentParams: GenerationParams = { faceImage, styleImage, clothingImage, accessories, influences, orthoPose, angledPose, facialExpression, facialExpressionIntensity, seed: parsedSeed };
 
         try {
-            const result = await generateCharacterAssets(faceImage, styleImage, clothingImage, accessories, influences, orthoPose, angledPose, facialExpression, facialExpressionIntensity);
+            const result = await generateCharacterAssets(faceImage, styleImage, clothingImage, accessories, influences, orthoPose, angledPose, facialExpression, facialExpressionIntensity, parsedSeed);
             setGeneratedAssets(result);
+            setLastGenerationParams(currentParams);
         } catch (err: any) {
             setError(err.message || "Đã xảy ra lỗi không xác định.");
         } finally {
-            setIsLoading(false);
+            setLoadingAction(null);
         }
-    }, [faceImage, styleImage, clothingImage, accessories, influences, orthoPose, angledPose, facialExpression, facialExpressionIntensity]);
+    }, [faceImage, styleImage, clothingImage, accessories, influences, orthoPose, angledPose, facialExpression, facialExpressionIntensity, seed]);
 
-    const isGenerateDisabled = (!faceImage && !styleImage && !clothingImage) || isLoading;
+    const handleVariationClick = useCallback(async () => {
+        if (!generatedAssets.portrait || !lastGenerationParams) {
+            setError("Cần có một chân dung đã tạo để tạo biến thể.");
+            return;
+        }
+        setLoadingAction('variation');
+        setError(null);
+        
+        const parsedSeed = seed && Number.isInteger(parseInt(seed, 10)) ? parseInt(seed, 10) : null;
+
+        try {
+            const result = await generateVariationAssets(
+                generatedAssets.portrait,
+                variationStrength,
+                lastGenerationParams,
+                parsedSeed
+            );
+            setGeneratedAssets(result);
+        } catch (err: any) {
+            setError(err.message || "Đã xảy ra lỗi không xác định khi tạo biến thể.");
+        } finally {
+            setLoadingAction(null);
+        }
+    }, [generatedAssets.portrait, variationStrength, lastGenerationParams, seed]);
+
+
+    const isGenerateDisabled = (!faceImage && !styleImage && !clothingImage) || loadingAction !== null;
 
     return (
         <div className="min-h-screen bg-gray-900 text-gray-100 p-4 sm:p-6 lg:p-8">
@@ -212,22 +244,31 @@ const App: React.FC = () => {
                     to { opacity: 1; transform: translateY(0); }
                 }
                 /* Custom scrollbar for webkit browsers */
-                .overflow-y-auto::-webkit-scrollbar {
+                .custom-scrollbar::-webkit-scrollbar {
                     width: 8px;
                 }
-                .overflow-y-auto::-webkit-scrollbar-track {
+                .custom-scrollbar::-webkit-scrollbar-track {
                     background: rgba(255, 255, 255, 0.1);
                     border-radius: 10px;
                 }
-                .overflow-y-auto::-webkit-scrollbar-thumb {
+                .custom-scrollbar::-webkit-scrollbar-thumb {
                     background: #06b6d4; /* cyan-500 */
                     border-radius: 10px;
                 }
-                .overflow-y-auto::-webkit-scrollbar-thumb:hover {
+                .custom-scrollbar::-webkit-scrollbar-thumb:hover {
                     background: #0891b2; /* cyan-600 */
                 }
+                 /* Hide spinner arrows on number inputs */
+                input[type='number']::-webkit-inner-spin-button,
+                input[type='number']::-webkit-outer-spin-button {
+                    -webkit-appearance: none;
+                    margin: 0;
+                }
+                input[type='number'] {
+                    -moz-appearance: textfield;
+                }
             `}</style>
-            <div className="max-w-7xl mx-auto">
+            <div className="max-w-screen-2xl mx-auto">
                 <header className="text-center mb-8">
                     <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight">
                         <span className="bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-blue-500">
@@ -237,9 +278,9 @@ const App: React.FC = () => {
                     <p className="mt-2 text-lg text-gray-400">Thiết kế anh hùng. Định hình phong cách. Sáng tạo nhân vật với AI.</p>
                 </header>
 
-                <main className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <main className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     {/* INPUTS PANEL */}
-                    <div className="grid grid-cols-1 md:grid-cols-1 gap-6">
+                    <div className="lg:col-span-1 grid grid-cols-1 md:grid-cols-1 gap-6">
                         <ImageInputBox title="Khuôn mặt Nhân vật" step={1} imagePreviewUrl={faceImage} onImageChange={handleImageChange(setFaceImage)}>
                              <div className="mt-4 pt-4 border-t border-gray-700">
                                 <label htmlFor="characterInfluence" className="text-sm font-semibold text-gray-400 block mb-2">Mức độ ảnh hưởng: Nhân vật <span className="font-mono bg-gray-700 px-2 py-1 rounded">{influences.character}%</span></label>
@@ -293,109 +334,161 @@ const App: React.FC = () => {
                         </ImageInputBox>
                     </div>
 
-                    {/* OUTPUT & CONTROLS PANEL */}
-                    <div className="bg-gray-800/50 p-6 rounded-lg shadow-2xl flex flex-col sticky top-8 h-[calc(100vh-4rem)]">
-                        <h2 className="text-2xl font-bold text-cyan-400 mb-4">Điều khiển & Kết quả</h2>
+                    {/* CONTROLS PANEL */}
+                    <div className="lg:col-span-1 bg-gray-800/50 p-6 rounded-lg shadow-2xl flex flex-col sticky top-8 h-[calc(100vh-4rem)]">
+                        <div className="flex-grow overflow-y-auto custom-scrollbar -mr-4 pr-4">
+                            <h2 className="text-2xl font-bold text-cyan-400 mb-4">Điều khiển</h2>
+                            
+                            <div className="mb-4">
+                                <label htmlFor="seed-input" className="block text-sm font-medium text-gray-300 mb-2">Seed (để trống để ngẫu nhiên)</label>
+                                <div className="flex items-center space-x-2">
+                                    <input
+                                        id="seed-input"
+                                        type="number"
+                                        value={seed}
+                                        onChange={(e) => setSeed(e.target.value.replace(/[^0-9]/g, ''))}
+                                        placeholder="Ví dụ: 12345"
+                                        className="flex-grow w-full appearance-none bg-gray-700 border border-gray-600 text-white py-2 px-3 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
+                                    />
+                                    <button 
+                                        onClick={() => setSeed(String(Math.floor(Math.random() * 1000000000)))}
+                                        className="py-2 px-4 font-semibold rounded-md transition-all duration-300 ease-in-out bg-gray-600 hover:bg-gray-500 text-white whitespace-nowrap"
+                                        aria-label="Tạo seed ngẫu nhiên"
+                                    >
+                                        Ngẫu nhiên
+                                    </button>
+                                </div>
+                            </div>
 
-                        <div className="mb-4">
-                            <label htmlFor="expression-select" className="block text-sm font-medium text-gray-300 mb-2">Biểu cảm Khuôn mặt</label>
-                            <div className="relative">
-                                <select
-                                    id="expression-select"
-                                    value={facialExpression}
-                                    onChange={(e) => setFacialExpression(e.target.value)}
-                                    className="w-full appearance-none bg-gray-700 border border-gray-600 text-white py-2 px-3 pr-8 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
-                                >
-                                    <option value="neutral">Trung tính</option>
-                                    <option value="from_face_reference" disabled={!faceImage}>Theo khuôn mặt mẫu</option>
-                                    <option value="happy">Vui vẻ</option>
-                                    <option value="sad">Buồn</option>
-                                    <option value="angry">Tức giận</option>
-                                    <option value="surprised">Ngạc nhiên</option>
-                                    <option value="smug">Tự mãn</option>
-                                </select>
-                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400">
-                                    <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                            <div className="mb-4">
+                                <label htmlFor="expression-select" className="block text-sm font-medium text-gray-300 mb-2">Biểu cảm Khuôn mặt</label>
+                                <div className="relative">
+                                    <select
+                                        id="expression-select"
+                                        value={facialExpression}
+                                        onChange={(e) => setFacialExpression(e.target.value)}
+                                        className="w-full appearance-none bg-gray-700 border border-gray-600 text-white py-2 px-3 pr-8 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
+                                    >
+                                        <option value="neutral">Trung tính</option>
+                                        <option value="from_face_reference" disabled={!faceImage}>Theo khuôn mặt mẫu</option>
+                                        <option value="happy">Vui vẻ</option>
+                                        <option value="sad">Buồn</option>
+                                        <option value="angry">Tức giận</option>
+                                        <option value="surprised">Ngạc nhiên</option>
+                                        <option value="smug">Tự mãn</option>
+                                    </select>
+                                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400">
+                                        <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mb-4">
+                                <label htmlFor="expressionIntensity" className="text-sm font-semibold text-gray-400 block mb-2">Cường độ Biểu cảm <span className="font-mono bg-gray-700 px-2 py-1 rounded">{facialExpressionIntensity}%</span></label>
+                                <input
+                                id="expressionIntensity"
+                                type="range"
+                                min="0"
+                                max="100"
+                                value={facialExpressionIntensity}
+                                onChange={(e) => setFacialExpressionIntensity(parseInt(e.target.value, 10))}
+                                className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                disabled={facialExpression === 'neutral' || facialExpression === 'from_face_reference'}
+                                />
+                            </div>
+
+
+                            <div className="mb-4">
+                                <label htmlFor="pose-select" className="block text-sm font-medium text-gray-300 mb-2">Tư thế (Bản vẽ trực giao)</label>
+                                <div className="relative">
+                                    <select
+                                        id="pose-select"
+                                        value={orthoPose}
+                                        onChange={(e) => setOrthoPose(e.target.value)}
+                                        className="w-full appearance-none bg-gray-700 border border-gray-600 text-white py-2 px-3 pr-8 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
+                                    >
+                                        <option value="standing">Đứng (Tư thế A)</option>
+                                        <option value="sitting">Ngồi</option>
+                                        <option value="lying down">Nằm</option>
+                                        <option value="jumping">Nhảy cao</option>
+                                        <option value="bowing">Cúi chào</option>
+                                        <option value="random">Ngẫu nhiên</option>
+                                    </select>
+                                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400">
+                                        <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mb-4">
+                                <label htmlFor="angled-pose-select" className="block text-sm font-medium text-gray-300 mb-2">Tư thế (Bản vẽ phối cảnh)</label>
+                                <div className="relative">
+                                    <select
+                                        id="angled-pose-select"
+                                        value={angledPose}
+                                        onChange={(e) => setAngledPose(e.target.value)}
+                                        className="w-full appearance-none bg-gray-700 border border-gray-600 text-white py-2 px-3 pr-8 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
+                                    >
+                                        <option value="random">Ngẫu nhiên & Sống động</option>
+                                        <option value="standing">Đứng</option>
+                                        <option value="sitting">Ngồi</option>
+                                        <option value="lying down">Nằm</option>
+                                        <option value="jumping">Nhảy</option>
+                                        <option value="bowing">Cúi chào</option>
+                                    </select>
+                                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400">
+                                        <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                                    </div>
                                 </div>
                             </div>
                         </div>
 
-                         <div className="mb-4">
-                            <label htmlFor="expressionIntensity" className="text-sm font-semibold text-gray-400 block mb-2">Cường độ Biểu cảm <span className="font-mono bg-gray-700 px-2 py-1 rounded">{facialExpressionIntensity}%</span></label>
-                            <input
-                            id="expressionIntensity"
-                            type="range"
-                            min="0"
-                            max="100"
-                            value={facialExpressionIntensity}
-                            onChange={(e) => setFacialExpressionIntensity(parseInt(e.target.value, 10))}
-                            className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                            disabled={facialExpression === 'neutral' || facialExpression === 'from_face_reference'}
-                            />
-                        </div>
+                        <div className="mt-auto pt-4 border-t border-gray-700/50">
+                            <button onClick={handleGenerateClick} disabled={isGenerateDisabled} className="w-full mb-4 py-3 px-4 font-bold text-lg rounded-md transition-all duration-300 ease-in-out bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:saturate-50 shadow-lg hover:shadow-cyan-500/50 flex items-center justify-center">
+                                {loadingAction === 'generate' && <SpinnerIcon className="w-6 h-6 mr-3" />}
+                                {loadingAction === 'generate' ? 'Đang tạo...' : 'Tạo hình Nhân vật'}
+                            </button>
 
-
-                        <div className="mb-4">
-                            <label htmlFor="pose-select" className="block text-sm font-medium text-gray-300 mb-2">Tư thế (Bản vẽ trực giao)</label>
-                            <div className="relative">
-                                <select
-                                    id="pose-select"
-                                    value={orthoPose}
-                                    onChange={(e) => setOrthoPose(e.target.value)}
-                                    className="w-full appearance-none bg-gray-700 border border-gray-600 text-white py-2 px-3 pr-8 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
-                                >
-                                    <option value="standing">Đứng (Tư thế A)</option>
-                                    <option value="sitting">Ngồi</option>
-                                    <option value="lying down">Nằm</option>
-                                    <option value="jumping">Nhảy cao</option>
-                                    <option value="bowing">Cúi chào</option>
-                                    <option value="random">Ngẫu nhiên</option>
-                                </select>
-                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400">
-                                    <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                            {lastGenerationParams && loadingAction === null && (
+                                <div className="animate-[fadeIn_0.5s_ease-in-out]">
+                                    <h3 className="text-lg font-bold text-cyan-400 mb-3">Bước tiếp theo</h3>
+                                    
+                                    <div className="p-4 bg-gray-900/50 rounded-lg">
+                                        <label htmlFor="variationStrength" className="text-sm font-semibold text-gray-400 block mb-2">Tạo Biến thể (Độ sáng tạo) <span className="font-mono bg-gray-700 px-2 py-1 rounded">{variationStrength}%</span></label>
+                                        <input
+                                            id="variationStrength"
+                                            type="range"
+                                            min="0"
+                                            max="100"
+                                            value={variationStrength}
+                                            onChange={(e) => setVariationStrength(parseInt(e.target.value, 10))}
+                                            className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            disabled={loadingAction !== null}
+                                        />
+                                        <button onClick={handleVariationClick} disabled={loadingAction !== null} className="w-full mt-3 py-2 px-4 font-semibold rounded-md transition-all duration-300 ease-in-out bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center">
+                                            {loadingAction === 'variation' && <SpinnerIcon className="w-5 h-5 mr-2" />}
+                                            {loadingAction === 'variation' ? 'Đang tạo biến thể...' : 'Tạo biến thể từ Chân dung'}
+                                        </button>
+                                    </div>
                                 </div>
-                            </div>
+                            )}
+                            
+                            {error && <div className="bg-red-900/50 border border-red-500 text-red-300 p-3 rounded-md text-sm mt-4">{error}</div>}
                         </div>
+                    </div>
 
-                        <div className="mb-4">
-                            <label htmlFor="angled-pose-select" className="block text-sm font-medium text-gray-300 mb-2">Tư thế (Bản vẽ phối cảnh)</label>
-                            <div className="relative">
-                                <select
-                                    id="angled-pose-select"
-                                    value={angledPose}
-                                    onChange={(e) => setAngledPose(e.target.value)}
-                                    className="w-full appearance-none bg-gray-700 border border-gray-600 text-white py-2 px-3 pr-8 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
-                                >
-                                    <option value="random">Ngẫu nhiên & Sống động</option>
-                                    <option value="standing">Đứng</option>
-                                    <option value="sitting">Ngồi</option>
-                                    <option value="lying down">Nằm</option>
-                                    <option value="jumping">Nhảy</option>
-                                    <option value="bowing">Cúi chào</option>
-                                </select>
-                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400">
-                                    <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <button onClick={handleGenerateClick} disabled={isGenerateDisabled} className="w-full mb-4 py-3 px-4 font-bold text-lg rounded-md transition-all duration-300 ease-in-out bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:saturate-50 shadow-lg hover:shadow-cyan-500/50 flex items-center justify-center">
-                            {isLoading && <SpinnerIcon className="w-6 h-6 mr-3" />}
-                            {isLoading ? 'Đang tạo...' : 'Tạo hình Nhân vật'}
-                        </button>
-                        
-                        {error && <div className="bg-red-900/50 border border-red-500 text-red-300 p-3 rounded-md text-sm">{error}</div>}
-                        
-                        {/* Output Area */}
-                        <div className="mt-4 flex-grow bg-gray-900/70 rounded-xl overflow-hidden shadow-inner">
-                           {isLoading && (
-                                <div className="text-center text-gray-400 flex flex-col items-center justify-center h-full">
+                    {/* OUTPUT PANEL */}
+                    <div className="lg:col-span-1 bg-gray-800/50 p-6 rounded-lg shadow-2xl flex flex-col sticky top-8 h-[calc(100vh-4rem)]">
+                        <h2 className="text-2xl font-bold text-cyan-400 mb-4 flex-shrink-0">Kết quả</h2>
+                        <div className="flex-grow bg-gray-900/70 rounded-xl overflow-hidden shadow-inner">
+                           {loadingAction !== null && (
+                                <div className="text-center text-gray-400 flex flex-col items-center justify-center h-full p-4">
                                     <SpinnerIcon className="w-16 h-16 mx-auto text-cyan-500" />
                                     <p className="mt-4 text-lg">Đang hợp nhất các đặc điểm...</p>
                                     <p className="text-sm text-gray-500">Đang tạo chân dung và bản vẽ nhân vật. Quá trình này có thể mất một chút thời gian.</p>
                                 </div>
                             )}
-                            {!isLoading && !generatedAssets.portrait && (
+                            {loadingAction === null && !generatedAssets.portrait && (
                                 <div className="text-center text-gray-500 flex items-center justify-center h-full">
                                     <p className="text-xl">Kết quả sẽ xuất hiện ở đây</p>
                                 </div>

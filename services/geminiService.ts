@@ -1,6 +1,5 @@
-
 import { GoogleGenAI, Modality, Part } from "@google/genai";
-import { Accessories, InfluenceValues } from '../types';
+import { Accessories, InfluenceValues, GenerationParams } from '../types';
 
 // Helper to convert base64 URL to a Part object for the Gemini API
 const fileToGenerativePart = (base64Data: string): Part => {
@@ -56,10 +55,16 @@ export const generateCharacterAssets = async (
   angledPose: string,
   facialExpression: string,
   facialExpressionIntensity: number,
+  seed: number | null
 ): Promise<{ portrait: string; orthoSheet: string; angledSheet: string }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
   try {
-    const portraitParts: Part[] = [];
+    const imageInputs: { role: 'face' | 'clothing' | 'style', base64: string }[] = [];
+    if (faceImage) imageInputs.push({ role: 'face', base64: faceImage });
+    if (clothingImage) imageInputs.push({ role: 'clothing', base64: clothingImage });
+    if (styleImage) imageInputs.push({ role: 'style', base64: styleImage });
+
+    const portraitParts: Part[] = imageInputs.map(input => fileToGenerativePart(input.base64));
     
     const characterStrength = getInfluenceStrength(influences.character);
     const clothingStrength = getInfluenceStrength(influences.clothing);
@@ -67,12 +72,12 @@ export const generateCharacterAssets = async (
 
     // --- Face ---
     let facePromptSection: string;
+    const faceInputIndex = imageInputs.findIndex(i => i.role === 'face');
     if (faceImage) {
-        portraitParts.push(fileToGenerativePart(faceImage));
         facePromptSection = `
-          1.  **Character Face Reference:**
-              - **MANDATE:** This image provides the character's face, hair, and core identity. Your instruction for how closely to follow these features is: **${characterStrength}**.
-              - **NEGATIVE CONSTRAINT (CRITICAL): You MUST COMPLETELY IGNORE all clothing, accessories, and background elements in this image.** Your ONLY focus from this image is the character's head, face, and hair. Do not copy the shirt or any other non-face element.
+          1.  **IMAGE ${faceInputIndex + 1} (Character Face Reference):**
+              - **MANDATE:** Image ${faceInputIndex + 1} provides the character's face, hair, and core identity. Your instruction for how closely to follow these features is: **${characterStrength}**.
+              - **NEGATIVE CONSTRAINT (CRITICAL): You MUST COMPLETELY IGNORE all clothing, accessories, and background elements in Image ${faceInputIndex + 1}.** Your ONLY focus from this image is the character's head, face, and hair. Do not copy the shirt or any other non-face element.
         `;
     } else {
         facePromptSection = `
@@ -83,12 +88,12 @@ export const generateCharacterAssets = async (
 
     // --- Clothing ---
     let clothingPromptSection: string;
+    const clothingInputIndex = imageInputs.findIndex(i => i.role === 'clothing');
     if (clothingImage) {
-        portraitParts.push(fileToGenerativePart(clothingImage));
         clothingPromptSection = `
-          2.  **Clothing Reference:**
-              - **MANDATE:** This image provides the character's outfit (top/shirt/jacket, etc.). Your instruction for how closely to replicate this clothing is: **${clothingStrength}**.
-              - **NEGATIVE CONSTRAINT (CRITICAL): You MUST COMPLETELY IGNORE the face, hair, and head of any character in this image.** Your ONLY focus from this image is the clothing, accessories, and the overall outfit design.
+          2.  **IMAGE ${clothingInputIndex + 1} (Clothing Reference):**
+              - **MANDATE:** Image ${clothingInputIndex + 1} provides the character's outfit (top/shirt/jacket, etc.). Your instruction for how closely to replicate this clothing is: **${clothingStrength}**.
+              - **NEGATIVE CONSTRAINT (CRITICAL): You MUST COMPLETELY IGNORE the face, hair, and head of any character in Image ${clothingInputIndex + 1}.** Your ONLY focus from this image is the clothing, accessories, and the overall outfit design.
         `;
     } else {
         clothingPromptSection = `
@@ -99,17 +104,18 @@ export const generateCharacterAssets = async (
     
     // --- Style ---
     let stylePromptSection: string;
+    const styleInputIndex = imageInputs.findIndex(i => i.role === 'style');
     let finalStyleCheck = "";
     if (styleImage) {
-        portraitParts.push(fileToGenerativePart(styleImage));
         finalStyleCheck = getFinalCheck(influences.style);
         stylePromptSection = `
-          3.  **Style Reference & Mandate: Two-Step Process**
-              Your goal is to replicate the artistic style of the "Style Reference" image onto the new character. Your level of adherence to this style is governed by this directive: this is **${styleStrength}**.
-              The Style Reference should ONLY influence the drawing technique (line art, color, shading, proportions) and NOT the character's features or clothing designs.
+          3.  **IMAGE ${styleInputIndex + 1} (Style Reference) & Mandate: Two-Step Process**
+              Your goal is to replicate the artistic style of Image ${styleInputIndex + 1}, the "Style Reference" image, onto the new character. Your level of adherence to this style is governed by this directive: this is **${styleStrength}**.
+              
+              **CRITICAL NEGATIVE CONSTRAINT:** The content of the Style Source image (the person, their clothes, the background) is completely irrelevant and is FORBIDDEN from being used in the final output. You are to ONLY analyze and replicate its artistic **technique** (line art, color, shading, etc.), NOT its subject matter.
 
               **Step 1: Analyze the Style Reference.**
-              Before drawing, you MUST first perform a detailed analysis of the provided Style Reference image. Deconstruct its style into these key components.
+              Before drawing, you MUST first perform a detailed analysis of the provided Style Reference image (Image ${styleInputIndex + 1}). Deconstruct its style into these key components.
               1.  **Line Art:** Describe the lines. Are they thick, thin, consistent, varied? Are they clean and digital, or sketchy and traditional? (e.g., "Clean, consistent-width black outlines.")
               2.  **Coloring Method:** Describe how colors are applied. Are they flat, cel-shaded with hard edges, soft-shaded with gradients, or painterly? (e.g., "Flat, solid colors with no gradients or textures.")
               3.  **Shading and Highlights:** Describe how light and shadow are used to create form. Is it minimal, complex, hard-edged, or soft? (e.g., "Minimal to no shading, relying on line art for form.")
@@ -134,7 +140,7 @@ export const generateCharacterAssets = async (
     if (facialExpression === 'neutral') {
         expressionInstruction = "The character should have a neutral, composed facial expression.";
     } else if (facialExpression === 'from_face_reference' && faceImage) {
-        expressionInstruction = "**EXPRESSION MANDATE:** The character's facial expression MUST be an exact, faithful replication of the expression seen in the 'Character Face Reference' image. This is a critical directive. Do not alter or change it.";
+        expressionInstruction = `**EXPRESSION MANDATE:** The character's facial expression MUST be an exact, faithful replication of the expression seen in the 'Character Face Reference' image (Image ${faceInputIndex + 1}). This is a critical directive. Do not alter or change it.`;
     } else {
         expressionInstruction = `**EXPRESSION MANDATE:** The character's facial expression MUST be ${expressionIntensityStrength} **${facialExpression}** expression. This is a critical directive.`;
     }
@@ -151,12 +157,12 @@ export const generateCharacterAssets = async (
       .filter(Boolean);
 
     const accessoriesString = (clothingImage && accessoriesToSave.length > 0)
-      ? `You MUST also include the following accessories from the Clothing Reference: ${accessoriesToSave.join(', ')}.`
+      ? `You MUST also include the following accessories from the Clothing Reference (Image ${clothingInputIndex + 1}): ${accessoriesToSave.join(', ')}.`
       : "Do not include any accessories like jewelry unless they are integral to the clothing itself.";
     
     
     const portraitPrompt = `
-      You are an expert comic book character designer. Your task is to generate a high-quality character portrait by synthesizing instructions and, if provided, reference images.
+      You are an expert comic book character designer. Your task is to generate a high-quality character portrait by synthesizing instructions from the provided text and images. The images are provided in a numbered sequence.
 
       **Input Instructions & VERY STRICT Rules:**
 
@@ -175,11 +181,18 @@ export const generateCharacterAssets = async (
       **Final Check:** ${finalStyleCheck} Before outputting, confirm you have followed all mandates according to the influence strengths provided.
     `;
     
+    const generationConfig: { responseModalities: Modality[], seed?: number } = {
+        responseModalities: [Modality.IMAGE]
+    };
+    if (seed !== null && seed !== undefined) {
+        generationConfig.seed = seed;
+    }
+
     // STEP 1: Generate the portrait first to establish the character's definitive look.
     const portraitResponse = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: { parts: [{ text: portraitPrompt }, ...portraitParts] },
-        config: { responseModalities: [Modality.IMAGE] }
+        config: generationConfig
     });
     
     const portraitResultPart = portraitResponse.candidates?.[0]?.content?.parts?.[0];
@@ -202,35 +215,29 @@ export const generateCharacterAssets = async (
     if (clothingImage) {
         sheetParts.push(fileToGenerativePart(clothingImage));
         consistencyMandate = `
-          **LAW OF FACIAL IDENTITY (ABSOLUTE & UNBREAKABLE):**
-          You have been provided an image named "Generated Character Portrait." This image is the **UNALTERABLE, CANONICAL, AND DEFINITIVE** source for the character's face, head, and hair. It is the law.
+          **Core Directive: Asset Separation and Identity Lock**
+          You have been provided with two input images for this task. Their roles are fixed and must not be confused.
+          - **INPUT 1: The Master Portrait.** This image is the **single source of truth** for the character's head. The face, hair, expression, and the art style of the head are locked and **MUST be duplicated exactly** in every drawing you produce.
+          - **INPUT 2: The Clothing Source.** This image is the **single source of truth** for the character's clothing and full-body outfit.
 
-          **YOUR CRITICAL MISSION: THE "HEAD TRACING" PROTOCOL**
-          Imagine you have a digital pair of scissors. You will "cut out" the entire head (face, hair, expression, style) from the "Generated Character Portrait." Then, for every single pose you draw on this character sheet, you will "paste" this identical head onto the new body.
-          
-          **THIS IS NOT A GUIDELINE. IT IS A TECHNICAL REQUIREMENT.**
-          - **RESULT:** The face in every quadrant of your output MUST be a **pixel-perfect, 1:1, flawless copy** of the face from the portrait, just viewed from a different angle.
-          - **CHECKLIST OF UNCHANGEABLE TRAITS (MUST MATCH 100%):**
-              - **Facial Structure:** Jawline, cheekbones, chin, forehead.
-              - **Key Features:** The exact shape, size, and placement of the eyes, nose, and mouth.
-              - **Identity:** The precise hairstyle, hair color, and skin tone.
-              - **Art Style:** The line weight, coloring, and shading of the face MUST be identical.
-          - **MENTAL MODEL:** Do not "redraw" the face from memory. **"TRACE" the face.** Any deviation, no matter how small, is a failure. No artistic license is permitted for the head.
+          **Execution Protocol (Non-Negotiable):**
+          For every character view you must draw, follow these steps:
+          1.  **Analyze Clothing:** Refer ONLY to **INPUT 2 (The Clothing Source)** to understand the complete outfit (shirt, pants, shoes, etc.).
+          2.  **Draw Body & Clothing:** Draw the character's body in the required pose, dressed in the complete outfit from Step 1.
+          3.  **Isolate Master Head:** Refer ONLY to **INPUT 1 (The Master Portrait)**. Mentally isolate the character's entire head.
+          4.  **Attach Master Head:** Attach the identical, unchanged head from Step 3 onto the body from Step 2.
 
-          **HIERARCHY OF TRUTH:**
-          1.  **Generated Character Portrait:** The **MASTER TEMPLATE** for the character's head and identity. Its authority is absolute.
-          2.  **Clothing Reference Photo:** Use ONLY for the outfit and body type. **CRITICAL:** Completely ignore the head, face, and hair in this photo. It is irrelevant. Using it is a critical error.
+          **CRITICAL FAILURE CONDITION:** If the face in your output does not look like a perfect copy of the face from **INPUT 1**, you have failed. If you use the face, head, or hair from **INPUT 2**, you have failed. Your primary function is to maintain character consistency by locking the head's appearance to **INPUT 1**.
 
           **CLOTHING INSTRUCTIONS:**
-          - The **ENTIRE OUTFIT** (top, bottom, shoes, etc.) MUST be taken **EXCLUSIVELY** from the **"Clothing Reference Photo"**.
-          - The character's body proportions and build should be based on the "Clothing Reference Photo" but rendered in the style defined by the "Generated Character Portrait".
-
+          - The **ENTIRE OUTFIT** (top, bottom, shoes, etc.) MUST be taken **EXCLUSIVELY** from **INPUT 2 ("The Clothing Source")**.
+          - The character's body proportions and build should be based on INPUT 2 but rendered in the style defined by INPUT 1.
           - **Accessories:** ${accessoriesString}
         `;
     } else {
         consistencyMandate = `
             **LAW OF FACIAL IDENTITY (ABSOLUTE & UNBREAKABLE):**
-            You have been provided with the "Generated Character Portrait". This image is the **UNALTERABLE, CANONICAL, AND DEFINITIVE** source for the character's **ENTIRE APPEARANCE AND IDENTITY**.
+            You have been provided with one image, the "Generated Character Portrait". This image is the **UNALTERABLE, CANONICAL, AND DEFINITIVE** source for the character's **ENTIRE APPEARANCE AND IDENTITY**.
 
             **YOUR CRITICAL MISSION: THE "FULL BODY TRACING" PROTOCOL**
             - **THE LAW:** The character's **ENTIRE BEING**—face, head, hair, clothing, body shape, and art style—in **EVERY SINGLE DRAWING YOU MAKE** must be an **EXACT, FLAWLESS, 1:1 REPLICATION** of the "Generated Character Portrait".
@@ -283,7 +290,7 @@ export const generateCharacterAssets = async (
       - **QUADRANT: Bottom-Left** -> **LABEL:** "Left Side View" -> **CONTENT:** Perfect 90-degree side view from the character's LEFT, looking left.
       - **QUADRANT: Bottom-Right** -> **LABEL:** "Right Side View" -> **CONTENT:** Perfect 90-degree side view from the character's RIGHT, looking right.
       
-      **Final Check:** Verify: 1. Single image? YES. 2. 2x2 grid? YES. 3. Exactly four views with correct content/quadrant? YES. 4. Appearance matches the "Generated Character Portrait" PERFECTLY? YES. Proceed only if all are YES.
+      **Final Check:** Verify: 1. Single image? YES. 2. 2x2 grid? YES. 3. Exactly four views with correct content/quadrant? YES. 4. Head and face are a PERFECT match to INPUT 1 (The Master Portrait)? YES. Proceed only if all are YES.
     `;
     
     let angledPoseInstruction: string;
@@ -332,20 +339,20 @@ export const generateCharacterAssets = async (
       4.  **Bottom-Right (Label: "Low-Angle View"):** A "worm's-eye view", looking up at the character from a steep low angle to create a heroic shot.
 
 
-      **Final Check:** Verify: 1. Single image? YES. 2. 2x2 grid? YES. 3. Exactly four views? YES. 4. Appearance matches the "Generated Character Portrait" PERFECTLY? YES. Proceed only if all are YES.
+      **Final Check:** Verify: 1. Single image? YES. 2. 2x2 grid? YES. 3. Exactly four views? YES. 4. Head and face are a PERFECT match to INPUT 1 (The Master Portrait)? YES. Proceed only if all are YES.
     `;
 
     // STEP 2: Generate the sheets in parallel.
     const orthoSheetPromise = ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: { parts: [{ text: orthoSheetPrompt }, ...sheetParts] },
-        config: { responseModalities: [Modality.IMAGE] }
+        config: generationConfig
     });
 
     const angledSheetPromise = ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: { parts: [{ text: angledSheetPrompt }, ...sheetParts] },
-        config: { responseModalities: [Modality.IMAGE] }
+        config: generationConfig
     });
 
     const [orthoSheetResponse, angledSheetResponse] = await Promise.all([orthoSheetPromise, angledSheetPromise]);
@@ -366,4 +373,197 @@ export const generateCharacterAssets = async (
     console.error("Error generating character assets:", error);
     throw new Error("Failed to generate character. Please check the console for more details.");
   }
+};
+
+
+const getVariationDescription = (value: number): string => {
+    if (value > 80) return "Perform a radical, artistic re-interpretation. The core facial identity should remain subtly recognizable, but you have full creative freedom to change the art style, clothing, setting, and overall theme. Imagine this is a 'What if...?' version of the character from an alternate universe.";
+    if (value > 50) return "Introduce significant, creative changes. You can change the outfit entirely, modify the hairstyle, and shift the art style in a noticeable but related direction (e.g., from modern comic to a slightly more painterly style). The character's core face should still be the clear foundation.";
+    if (value > 20) return "Make noticeable adjustments. You could change the character's expression, alter details on their clothing (e.g., change a t-shirt graphic), or slightly refine the hairstyle. The character should be clearly the same person in the same style, but with minor variations.";
+    return "Make very subtle changes. The character should be almost identical. Focus on minor details like lighting, a few strands of hair, texture of the clothing, or a slight shift in head angle. The goal is a near-perfect match with tiny differences.";
+};
+
+export const generateVariationAssets = async (
+  basePortraitImage: string,
+  variationStrength: number,
+  originalParams: GenerationParams,
+  seed: number | null
+): Promise<{ portrait: string; orthoSheet: string; angledSheet: string }> => {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+
+    try {
+        const generationConfig: { responseModalities: Modality[], seed?: number } = {
+            responseModalities: [Modality.IMAGE]
+        };
+        if (seed !== null && seed !== undefined) {
+            generationConfig.seed = seed;
+        }
+
+        // STEP 1: Generate the new, varied portrait.
+        const variationDescription = getVariationDescription(variationStrength);
+        const variationPrompt = `
+          You are an expert character designer specializing in creating variations.
+          Your task is to generate a new character portrait based on the provided image, adhering to a specific level of creative variation.
+
+          **Input Image:** The provided image is the original character portrait.
+          
+          **Variation Mandate (${variationStrength}%):** ${variationDescription}
+
+          **Output Requirements:**
+          - Generate a single, high-quality, square portrait image that is a variation of the input.
+          - The portrait MUST be a close-up "bust shot," showing ONLY the character's head, shoulders, and upper torso.
+          - **NEGATIVE CONSTRAINT (CRITICAL): The image MUST NOT show any hands, arms, or any part of the body below the chest.** Any visible hands will result in a failure.
+          - The background MUST be a simple, neutral medium gray (#808080).
+        `;
+        
+        const basePortraitPart = fileToGenerativePart(basePortraitImage);
+        
+        const portraitResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts: [{ text: variationPrompt }, basePortraitPart] },
+            config: generationConfig
+        });
+
+        const portraitResultPart = portraitResponse.candidates?.[0]?.content?.parts?.[0];
+        if (!portraitResultPart?.inlineData) {
+            throw new Error("Failed to generate the character portrait variation.");
+        }
+        const newPortraitImage = `data:${portraitResultPart.inlineData.mimeType};base64,${portraitResultPart.inlineData.data}`;
+        
+        const definitiveCharacterPart = {
+            inlineData: {
+                mimeType: portraitResultPart.inlineData.mimeType,
+                data: portraitResultPart.inlineData.data,
+            },
+        };
+
+        // STEP 2: Generate the sheets based on the NEW portrait, using original settings.
+        const { clothingImage, accessories, orthoPose, angledPose } = originalParams;
+
+        const accessoriesToSave = Object.entries(accessories)
+            .filter(([, value]) => value)
+            .map(([key]) => {
+                if (key === 'bracelets') return 'bracelets (vòng tay)';
+                if (key === 'necklaces') return 'necklaces (vòng cổ)';
+                if (key === 'earrings') return 'earrings (khuyên tai)';
+                if (key === 'eyeglasses') return 'eyeglasses (kính mắt)';
+                return '';
+            })
+            .filter(Boolean);
+
+        const accessoriesString = (clothingImage && accessoriesToSave.length > 0)
+            ? `You MUST also include the following accessories from the Clothing Reference (Image 2): ${accessoriesToSave.join(', ')}.`
+            : "Do not include any accessories like jewelry unless they are integral to the clothing itself.";
+
+        let consistencyMandate: string;
+        const sheetParts: Part[] = [definitiveCharacterPart];
+        
+        if (clothingImage) {
+            sheetParts.push(fileToGenerativePart(clothingImage));
+            consistencyMandate = `
+              **Core Directive: Asset Separation and Identity Lock**
+              You have been provided with two input images for this task. Their roles are fixed and must not be confused.
+              - **INPUT 1: The Master Portrait.** This image is the **single source of truth** for the character's head. The face, hair, expression, and the art style of the head are locked and **MUST be duplicated exactly** in every drawing you produce.
+              - **INPUT 2: The Clothing Source.** This image is the **single source of truth** for the character's clothing and full-body outfit.
+    
+              **Execution Protocol (Non-Negotiable):**
+              For every character view you must draw, follow these steps:
+              1.  **Analyze Clothing:** Refer ONLY to **INPUT 2 (The Clothing Source)** to understand the complete outfit (shirt, pants, shoes, etc.).
+              2.  **Draw Body & Clothing:** Draw the character's body in the required pose, dressed in the complete outfit from Step 1.
+              3.  **Isolate Master Head:** Refer ONLY to **INPUT 1 (The Master Portrait)**. Mentally isolate the character's entire head.
+              4.  **Attach Master Head:** Attach the identical, unchanged head from Step 3 onto the body from Step 2.
+    
+              **CRITICAL FAILURE CONDITION:** If the face in your output does not look like a perfect copy of the face from **INPUT 1**, you have failed. If you use the face, head, or hair from **INPUT 2**, you have failed. Your primary function is to maintain character consistency by locking the head's appearance to **INPUT 1**.
+    
+              **CLOTHING INSTRUCTIONS:**
+              - The **ENTIRE OUTFIT** (top, bottom, shoes, etc.) MUST be taken **EXCLUSIVELY** from **INPUT 2 ("The Clothing Source")**.
+              - The character's body proportions and build should be based on INPUT 2 but rendered in the style defined by INPUT 1.
+              - **Accessories:** ${accessoriesString}
+            `;
+        } else {
+            consistencyMandate = `
+                **LAW OF FACIAL IDENTITY (ABSOLUTE & UNBREAKABLE):**
+                You have been provided with one image, the "Generated Character Portrait". This image is the **UNALTERABLE, CANONICAL, AND DEFINITIVE** source for the character's **ENTIRE APPEARANCE AND IDENTITY**.
+                **YOUR CRITICAL MISSION: THE "FULL BODY TRACING" PROTOCOL**
+                The character's **ENTIRE BEING**—face, head, hair, clothing, body shape, and art style—in **EVERY SINGLE DRAWING YOU MAKE** must be an **EXACT, FLAWLESS, 1:1 REPLICATION** of the "Generated Character Portrait". Your only job is to re-pose and redraw the exact same character from different camera angles. NO DEVIATION IS ALLOWED.
+            `;
+        }
+
+        let orthoPoseInstruction = "in a neutral, standing A-pose";
+        switch (orthoPose) {
+            case 'sitting': orthoPoseInstruction = "in a simple sitting pose, as if on an invisible chair"; break;
+            case 'lying down': orthoPoseInstruction = "in a simple pose lying flat on their back"; break;
+            case 'jumping': orthoPoseInstruction = "in a dynamic high-jump pose, frozen mid-air"; break;
+            case 'bowing': orthoPoseInstruction = "in a pose of bending forward at the waist in a bow"; break;
+            case 'random': orthoPoseInstruction = "in a dynamic and interesting pose of your choice"; break;
+        }
+
+        const orthoSheetPrompt = `
+          You are an expert comic book character designer. Generate a character sheet with orthographic views.
+          **CRITICAL OUTPUT FORMATTING MANDATE:** Produce a SINGLE IMAGE as a 2x2 GRID with a uniform medium gray (#808080) background. Failure to produce a perfect 4-view, 2x2 grid is a failure of the entire request.
+          ${consistencyMandate}
+          **Grid Content:** Draw the character ${orthoPoseInstruction} for all views. The pose must be identical across all views; only the camera angle changes. Each view MUST have the specified label below it.
+          - **Top-Left:** "Front View" (Direct front)
+          - **Top-Right:** "Back View" (Direct back)
+          - **Bottom-Left:** "Left Side View" (90-degree side from character's LEFT)
+          - **Bottom-Right:** "Right Side View" (90-degree side from character's RIGHT)
+          **Final Check:** 1. Single image? YES. 2. 2x2 grid? YES. 3. Four views correct? YES. 4. Head and face are a PERFECT match to INPUT 1 (The Master Portrait)? YES. Proceed only if all are YES.
+        `;
+        
+        let angledPoseInstruction: string;
+        switch (angledPose) {
+            case 'standing': angledPoseInstruction = "The character MUST be standing in all four views. Each view should feature a unique, dynamic standing pose."; break;
+            case 'sitting': angledPoseInstruction = "The character MUST be sitting in all four views. Each view should feature a unique, dynamic sitting pose."; break;
+            case 'lying down': angledPoseInstruction = "The character MUST be lying down in all four views. Each view should feature a unique, dynamic pose while lying down."; break;
+            case 'jumping': angledPoseInstruction = "The character MUST be in a jumping or mid-air pose in all four views. Each view should feature a unique, dynamic jump."; break;
+            case 'bowing': angledPoseInstruction = "The character MUST be bowing or bent over in all four views. Each view should feature a unique, dynamic bowing pose."; break;
+            case 'random':
+            default:
+                angledPoseInstruction = "You are to generate four dynamic, distinct, and compelling poses for the character that showcase their personality. Each of the four views in the grid MUST feature a unique pose. Avoid simple or repetitive A-poses.";
+                break;
+        }
+
+        const angledSheetPrompt = `
+          You are an expert comic book character designer. Create a sheet of dynamic angled views.
+          **CRITICAL OUTPUT FORMATTING MANDATE:** Your final output MUST be a single image file, structured as a 2x2 grid with a uniform medium gray (#808080) background, containing EXACTLY FOUR (4) drawings.
+          ${consistencyMandate}
+          **Pose Generation:** ${angledPoseInstruction}
+          **Grid Content:**
+          1.  **Top-Left (Label: "45° Front-Left"):** 45-degree view from character's front-left. Emphasize their LEFT side.
+          2.  **Top-Right (Label: "45° Front-Right"):** 45-degree view from character's front-right. Emphasize their RIGHT side.
+          3.  **Bottom-Left (Label: "High-Angle View"):** "Bird's-eye view", looking down at the character.
+          4.  **Bottom-Right (Label: "Low-Angle View"):** "Worm's-eye view", looking up at the character.
+          **Final Check:** 1. Single image? YES. 2. 2x2 grid? YES. 3. Four views? YES. 4. Head and face are a PERFECT match to INPUT 1 (The Master Portrait)? YES. Proceed only if all are YES.
+        `;
+
+        const orthoSheetPromise = ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts: [{ text: orthoSheetPrompt }, ...sheetParts] },
+            config: generationConfig
+        });
+
+        const angledSheetPromise = ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts: [{ text: angledSheetPrompt }, ...sheetParts] },
+            config: generationConfig
+        });
+
+        const [orthoSheetResponse, angledSheetResponse] = await Promise.all([orthoSheetPromise, angledSheetPromise]);
+        
+        const orthoSheetPart = orthoSheetResponse.candidates?.[0]?.content?.parts?.[0];
+        const angledSheetPart = angledSheetResponse.candidates?.[0]?.content?.parts?.[0];
+
+        if (!orthoSheetPart?.inlineData || !angledSheetPart?.inlineData) {
+            throw new Error("No image was generated for the character sheets. The model may have refused the request.");
+        }
+        
+        const orthoSheetImage = `data:${orthoSheetPart.inlineData.mimeType};base64,${orthoSheetPart.inlineData.data}`;
+        const angledSheetImage = `data:${angledSheetPart.inlineData.mimeType};base64,${angledSheetPart.inlineData.data}`;
+
+        return { portrait: newPortraitImage, orthoSheet: orthoSheetImage, angledSheet: angledSheetImage };
+
+    } catch (error) {
+        console.error("Error generating character variation:", error);
+        throw new Error("Failed to generate character variation. Please check the console for more details.");
+    }
 };
