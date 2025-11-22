@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface ImageZoomModalProps {
   imageUrl: string | null;
@@ -7,6 +8,7 @@ interface ImageZoomModalProps {
 }
 
 const ImageZoomModal: React.FC<ImageZoomModalProps> = ({ imageUrl, onClose }) => {
+  const { t } = useLanguage();
   const [transform, setTransform] = useState({ scale: 1, x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const startPos = useRef({ x: 0, y: 0 });
@@ -88,12 +90,12 @@ const ImageZoomModal: React.FC<ImageZoomModalProps> = ({ imageUrl, onClose }) =>
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label="Trình xem ảnh"
+      aria-label={t.imageViewer}
     >
       <button
         onClick={onClose}
         className="absolute top-4 right-4 text-white text-4xl font-bold hover:text-cyan-400 transition-colors z-50"
-        aria-label="Đóng"
+        aria-label={t.close}
       >
         &times;
       </button>
@@ -106,7 +108,7 @@ const ImageZoomModal: React.FC<ImageZoomModalProps> = ({ imageUrl, onClose }) =>
         <img
           ref={imageRef}
           src={imageUrl}
-          alt="Ảnh phóng to"
+          alt={t.zoomedInImageAlt}
           className={`max-w-full max-h-full transition-transform duration-75 ease-out ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
           style={{ 
             transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,

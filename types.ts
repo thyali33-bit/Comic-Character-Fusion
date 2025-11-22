@@ -1,3 +1,4 @@
+
 export interface Accessories {
   bracelets: boolean;
   necklaces: boolean;
@@ -21,6 +22,17 @@ export interface GenerationParams {
   angledPose: string;
   facialExpression: string;
   facialExpressionIntensity: number;
-  seed: number | null;
+  prompt: string;
   quality: string;
+  threeDActionPrompt: string;
+  primaryColor: string;
+  secondaryColor: string;
+  enableColorOverride: boolean;
+}
+
+export interface Preset {
+  id: string;
+  name: string;
+  timestamp: number;
+  config: Omit<GenerationParams, 'faceImage' | 'styleImage' | 'clothingImage'>;
 }
