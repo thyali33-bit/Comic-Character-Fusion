@@ -14,7 +14,7 @@ const STYLE_PROMPTS: Record<string, string> = {
     one_piece: "One Piece Anime Style (Eiichiro Oda). Exaggerated expressions. Bold line art. Dynamic shading.",
     doraemon: "Doraemon Style (Fujiko F. Fujio). Retro, round shapes. Simple, clean lines. 1970s anime aesthetic.",
     chibi: "Chibi Style. 2-3 heads tall. Large head, tiny body. Simplified details. Cute and round.",
-    dragon_ball: "Dragon Ball Z Style (Akira Toriyama). Angular musculature. High contrast cel-shading. Thick black outlines. Dynamic energy. DO NOT CHANGE FACE SHAPE.",
+    dragon_ball: "Dragon Ball Z Style (Akira Toriyama). Focus on: Angular musculature, high contrast cel-shading, thick outlines. DO NOT DISTORT FACE. Keep eyes proportional to the reference face, do not blindly apply giant anime eyes if they don't fit.",
     comic: "American Comic Book Style. Jim Lee / Marvel style. Bold black ink outlines. Cross-hatching. Dynamic anatomy. Dramatic lighting.",
     ukiyoe: "Ukiyo-e Style (Japanese Woodblock). Flat perspective. Bold outlines. Traditional patterns. Textured paper feel.",
     renaissance: "Renaissance Oil Painting. Da Vinci style. Sfumato blending. Realistic anatomy. Dramatic chiaroscuro lighting.",
@@ -265,62 +265,14 @@ export const generateOrthoView = async (portraitImage: string, params: Generatio
     2. **IDENTITY**: You MUST use the exact face/head from REFERENCE B. Do not redraw the face with different features.
     3. **VIEW**: ${viewInstructions[viewType]}
     4. **PROJECTION**: Orthographic/Parallel projection. No foreshortening. No perspective distortion.
-    5. **POSE**: ${params.orthoPose.toUpperCase()} (Neutral Standing). Arms slightly away from body. Legs straight.
-    6. **FRAMING**: FULL BODY. Do not crop head or feet. Centered.
-    
-    BACKGROUND: Plain White.
+    5. **POSE**: Standing A-Pose. Arms slightly out. Legs straight.
+    6. **BACKGROUND**: Solid Neutral Grey (0x808080).
     `;
 
-    parts.unshift({ text: prompt });
+    parts.push({ text: prompt });
 
     const modelName = params.quality === 'hd' ? MODEL_HD : MODEL_STANDARD;
-
-    // Use 9:16 for individual character frames (tall aspect ratio)
-    const response = await ai.models.generateContent({
-        model: modelName,
-        contents: { parts },
-        config: {
-            imageConfig: {
-                aspectRatio: "9:16", 
-                numberOfImages: 1
-            }
-        }
-    });
-
-    const imagePart = findImagePartOrThrow(response, `Ortho ${viewType} Generation`);
-    return `data:${imagePart.inlineData!.mimeType};base64,${imagePart.inlineData!.data}`;
-};
-
-export const generateAngledSheet = async (portraitImage: string, params: GenerationParams): Promise<string> => {
-    const parts: Part[] = [];
-
-    if (params.clothingImage) {
-        parts.push({ text: "REFERENCE A (OUTFIT - DO NOT CHANGE DESIGN):" });
-        parts.push(fileToGenerativePart(params.clothingImage));
-    }
-
-    parts.push({ text: "REFERENCE B (HEAD - DO NOT CHANGE FACE):" });
-    parts.push(fileToGenerativePart(portraitImage));
-
-    const prompt = `
-    TASK: Generate a DYNAMIC ACTION POSE SHEET.
     
-    STYLE: ${getStyleDescription(params)}
-    
-    INSTRUCTIONS:
-    1. Character: Head from Ref B, Outfit from Ref A.
-    2. **IDENTITY**: Strictly preserve the face from Reference B.
-    3. **ACTION**: Create 3 or 4 distinct, energetic poses.
-    4. **POSE TYPE**: ${params.angledPose}.
-    5. **COMPOSITION**: Distribute poses evenly on the page.
-    
-    BACKGROUND: ${getBackgroundPrompt(params)}
-    `;
-
-    parts.unshift({ text: prompt });
-
-    const modelName = params.quality === 'hd' ? MODEL_HD : MODEL_STANDARD;
-
     const response = await ai.models.generateContent({
         model: modelName,
         contents: { parts },
@@ -332,108 +284,120 @@ export const generateAngledSheet = async (portraitImage: string, params: Generat
         }
     });
 
-    const imagePart = findImagePartOrThrow(response, "Angled Sheet Generation");
+    const imagePart = findImagePartOrThrow(response, `Ortho ${viewType}`);
+    return `data:${imagePart.inlineData!.mimeType};base64,${imagePart.inlineData!.data}`;
+};
+
+export const generateAngledSheet = async (portraitImage: string, params: GenerationParams): Promise<string> => {
+    const parts: Part[] = [];
+    
+    // Inject Original Outfit Source
+    if (params.clothingImage) {
+        parts.push({ text: "REFERENCE A (OUTFIT):" });
+        parts.push(fileToGenerativePart(params.clothingImage));
+    }
+
+    parts.push({ text: "REFERENCE B (HEAD/FACE):" });
+    parts.push(fileToGenerativePart(portraitImage));
+
+    const prompt = `
+    TASK: Generate a Dynamic Action Pose Sheet (4 Poses).
+    STYLE: ${getStyleDescription(params)}
+    
+    INSTRUCTIONS:
+    1. Use Head from Ref B, Outfit from Ref A.
+    2. Poses: Jumping, Attacking, Crouching, Running.
+    3. Layout: 2x2 Grid.
+    4. BACKGROUND: Simple/Clean.
+    `;
+
+    parts.push({ text: prompt });
+
+    const modelName = params.quality === 'hd' ? MODEL_HD : MODEL_STANDARD;
+
+    const response = await ai.models.generateContent({
+        model: modelName,
+        contents: { parts },
+        config: {
+            imageConfig: {
+                aspectRatio: "1:1",
+                numberOfImages: 1
+            }
+        }
+    });
+
+    const imagePart = findImagePartOrThrow(response, "Action Poses");
     return `data:${imagePart.inlineData!.mimeType};base64,${imagePart.inlineData!.data}`;
 };
 
 export const generateTurntableViews = async (portraitImage: string, params: GenerationParams): Promise<string> => {
     const parts: Part[] = [];
 
-    if (params.clothingImage) {
-        parts.push({ text: "REFERENCE A (OUTFIT):" });
-        parts.push(fileToGenerativePart(params.clothingImage));
-    }
-
-    parts.push({ text: "REFERENCE B (HEAD):" });
+    // Source of Truth: The Portrait
+    parts.push({ text: "REFERENCE_TRUTH (USE THIS FOR FACE AND FRONT DESIGN):" });
     parts.push(fileToGenerativePart(portraitImage));
 
-    let baseStyle = STYLE_PROMPTS[params.artStyle] || STYLE_PROMPTS['comic'];
-    if (params.artStylePrompt) baseStyle += ` ${params.artStylePrompt}`;
+    // Secondary Ref: Raw Clothing (for back details only)
+    if (params.clothingImage) {
+        parts.push({ text: "REFERENCE_SECONDARY (USE ONLY FOR BACK/UNSEEN DETAILS):" });
+        parts.push(fileToGenerativePart(params.clothingImage));
+    }
+    
+    const threeDAction = params.threeDActionPrompt 
+        ? `ACTION POSE: ${params.threeDActionPrompt}. The statue is FROZEN in this action.` 
+        : `POSE: Heroic Standing Pose. Chest out, confident.`;
 
-    const threeDStylePrompt = `
-    TRANSFORM STYLE INTO 3D: Interpret "${baseStyle}" as a high-fidelity digital figure.
-    RENDER: Octane Render, Global Illumination, Soft Shadows.
-    MATERIAL: Matte skin, realistic fabric textures.
-    ${params.isBlackAndWhite ? 'COLOR: Clay Render (Greyscale).' : 'COLOR: Full Color Render.'}
-    `;
+    // Determine 3D Style based on Art Style
+    let threeDStyleKeyword = "High-End Collectible Statue. PVC/Resin Material. Hand-painted finish.";
+    if (params.artStyle === 'ghibli' || params.artStyle === 'chibi') {
+        threeDStyleKeyword = "Clay/Ceramic Figurine. Soft matte finish.";
+    } else if (params.artStyle === 'cyberpunk') {
+        threeDStyleKeyword = "Metallic/Plastic Action Figure. Glossy finish.";
+    }
 
     const prompt = `
-    TASK: Generate a 2x2 SPRITE SHEET for a 3D Turntable.
+    TASK: Generate a 2x2 Texture Sprite Sheet for a 3D Turntable.
+    OUTPUT: A single image containing 4 views arranged in a 2x2 grid:
+    [0° Front] [90° Right]
+    [180° Back] [270° Left]
+
+    VISUAL STYLE:
+    - ${threeDStyleKeyword}
+    - Rendering: Unreal Engine 5 / Arnold Render. Studio Lighting with Rim Lights.
+    - Style Adaptation: Convert the 2D Art Style (${params.artStyle}) into a 3D Physical Object.
+    - If Anime: Keep the anime face proportions but make it look like a 3D figure (not a flat drawing).
+
+    SUBJECT CONSISTENCY (CRITICAL):
+    - The subject is a PHYSICAL STATUE. It DOES NOT MOVE between frames.
+    - SAME Face (from Ref Truth). SAME Outfit. SAME Pose.
+    - Only the CAMERA rotates around the object.
     
-    INSTRUCTIONS:
-    1. Character: Head from Ref B, Outfit from Ref A.
-    2. **IDENTITY**: STICK TO THE FACE OF REF B.
-    3. **LAYOUT**: 2x2 Grid.
-       Top-Left: FRONT View
-       Top-Right: RIGHT View
-       Bottom-Left: BACK View
-       Bottom-Right: LEFT View
-    4. **CONSTRAINT**: Frozen pose. Only camera rotates.
-    5. **POSE**: ${params.threeDActionPrompt || 'Standing Heroic Pose'}.
+    ${threeDAction}
     
-    STYLE: ${threeDStylePrompt}
-    BACKGROUND: ${getBackgroundPrompt(params)}
+    BACKGROUND: Dark Grey Studio Background.
     `;
 
-    parts.unshift({ text: prompt });
+    parts.push({ text: prompt });
 
+    // Use HD model for 3D to ensure texture details
     const response = await ai.models.generateContent({
-        model: MODEL_HD, 
+        model: MODEL_HD,
         contents: { parts },
         config: {
             imageConfig: {
                 aspectRatio: "1:1",
                 numberOfImages: 1,
-                imageSize: "2K"
+                // Explicitly requesting high resolution via model choice, prompt handles details
             }
         }
     });
 
-    const imagePart = findImagePartOrThrow(response, "3D Turntable Generation");
+    const imagePart = findImagePartOrThrow(response, "3D Turntable");
     return `data:${imagePart.inlineData!.mimeType};base64,${imagePart.inlineData!.data}`;
 };
 
 export const generate3DViewAngle = async (portraitImage: string, params: GenerationParams, angle: number): Promise<string> => {
-    const parts: Part[] = [];
-    
-    if (params.clothingImage) {
-        parts.push({ text: "OUTFIT REF" });
-        parts.push(fileToGenerativePart(params.clothingImage));
-    }
-    parts.push({ text: "HEAD REF" });
-    parts.push(fileToGenerativePart(portraitImage));
-
-    let baseStyle = STYLE_PROMPTS[params.artStyle] || STYLE_PROMPTS['comic'];
-    if (params.artStylePrompt) baseStyle += ` ${params.artStylePrompt}`;
-
-    const threeDStylePrompt = `
-    Interpret style "${baseStyle}" as a 3D RENDER.
-    High fidelity, ray tracing.
-    ${params.isBlackAndWhite ? 'Greyscale Clay Render.' : 'Full Color.'}
-    `;
-
-    const prompt = `
-    Render a single view of the character at ${angle} degrees (Y-axis rotation).
-    HEAD: Matches HEAD REF exactly.
-    OUTFIT: Matches OUTFIT REF exactly.
-    STYLE: ${threeDStylePrompt}
-    ACTION: ${params.threeDActionPrompt || 'Standing'}.
-    `;
-    
-    parts.unshift({ text: prompt });
-    
-    const response = await ai.models.generateContent({
-        model: MODEL_HD,
-        contents: { parts },
-        config: { 
-            imageConfig: { 
-                aspectRatio: "1:1", 
-                numberOfImages: 1,
-                imageSize: "2K"
-            } 
-        }
-    });
-    
-    const imagePart = findImagePartOrThrow(response, "Single 3D View Generation");
-    return `data:${imagePart.inlineData!.mimeType};base64,${imagePart.inlineData!.data}`;
+    // This function is kept for the interactive viewer if needed, but main gallery uses the sheet.
+    // Re-using logic from turntable but requesting single angle.
+    return generateTurntableViews(portraitImage, params); 
 };
