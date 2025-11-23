@@ -17,6 +17,7 @@ interface TurntableGalleryProps {
     onShare: (url: string) => void;
     onReGenerate?: () => void;
     isGenerating: boolean;
+    isDependencyMet?: boolean;
 }
 
 const QUADRANT_POSITIONS = ['0% 0%', '100% 0%', '0% 100%', '100% 100%'];
@@ -55,7 +56,7 @@ const getCroppedImage = (sheetUrl: string, cropIndex: number): Promise<string> =
   });
 };
 
-const TurntableGallery: React.FC<TurntableGalleryProps> = ({ title, sheetUrl, onZoom, onShare, onReGenerate, isGenerating }) => {
+const TurntableGallery: React.FC<TurntableGalleryProps> = ({ title, sheetUrl, onZoom, onShare, onReGenerate, isGenerating, isDependencyMet = true }) => {
     const { t } = useLanguage();
     // Rotation angle in degrees.
     // 0 = Front, -90 = Right, -180 = Back, -270 = Left
@@ -134,33 +135,38 @@ const TurntableGallery: React.FC<TurntableGalleryProps> = ({ title, sheetUrl, on
     // Calculate translateZ. For a cube, the face is at width/2 distance from center.
     const translateZ = containerWidth / 2;
 
-    if (!sheetUrl && !isGenerating) {
-        return null;
-    }
-
     return (
-        <div className="bg-gray-900/50 p-4 rounded-xl shadow-lg flex flex-col border border-gray-700">
-            <div className="flex justify-between items-center mb-4 relative z-10">
-                <h4 className="text-lg font-bold text-cyan-400 flex items-center gap-2">
-                    <span className="w-2 h-6 bg-cyan-500 rounded-full"></span>
-                    {title}
-                </h4>
-                <div className="flex gap-2">
-                    {onReGenerate && (
-                        <button 
-                            onClick={onReGenerate} 
-                            className="text-gray-400 hover:text-cyan-400 transition-colors p-2 bg-gray-800 rounded-full hover:bg-gray-700" 
-                            title={t.regenerate3DViewTooltip}
-                        >
-                            <RegenIcon className="w-5 h-5" />
-                        </button>
+        <div className={`bg-gray-900/50 p-4 rounded-xl shadow-lg flex flex-col border ${sheetUrl ? 'border-gray-700' : 'border-gray-800 border-dashed'}`}>
+            <div className="mb-4 relative z-10 flex justify-between items-center">
+                <div>
+                    <h4 className="text-lg font-bold text-cyan-400 flex items-center gap-2">
+                        <span className="w-2 h-6 bg-cyan-500 rounded-full"></span>
+                        {title}
+                    </h4>
+                    {sheetUrl && (
+                        <p className="text-xs text-gray-400 mt-1 italic opacity-75">
+                            {t.threeDRegenHelp}
+                        </p>
                     )}
                 </div>
+                {/* Generate Button when empty but ready */}
+                {!sheetUrl && !isGenerating && isDependencyMet && onReGenerate && (
+                    <button 
+                        onClick={onReGenerate}
+                        className="text-xs font-bold text-cyan-400 border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 rounded-lg hover:bg-cyan-500/20 transition-colors flex items-center gap-2"
+                    >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        {t.clickToGenerate}
+                    </button>
+                )}
+                {!sheetUrl && !isGenerating && !isDependencyMet && (
+                     <span className="text-xs text-gray-500 border border-gray-700 px-2 py-1 rounded">{t.waitingForPortrait}</span>
+                )}
             </div>
 
             {/* 3D Scene Container */}
             <div 
-                className="relative w-full aspect-square bg-gray-900 rounded-lg overflow-hidden group perspective-container mb-4"
+                className={`relative w-full aspect-square rounded-lg overflow-hidden group perspective-container mb-4 ${sheetUrl ? 'bg-gray-900' : 'bg-gray-900/30 flex items-center justify-center'}`}
                 ref={containerRef}
                 style={{ perspective: '1200px' }}
             >
@@ -222,14 +228,31 @@ const TurntableGallery: React.FC<TurntableGalleryProps> = ({ title, sheetUrl, on
                             }}
                         />
                     </div>
-                ) : null}
+                ) : (
+                    // Empty State for 3D Container
+                    <div className="text-center p-6 text-gray-600">
+                        <div className="w-16 h-16 rounded-full bg-gray-800/50 border border-gray-700/50 flex items-center justify-center mb-3 mx-auto">
+                            <svg className="w-8 h-8 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" /></svg>
+                        </div>
+                        <p className="text-sm opacity-50">{isDependencyMet ? t.clickToGenerate : t.createPortraitFirst}</p>
+                    </div>
+                )}
 
-                {/* Overlay Controls (Zoom, Share, Download) */}
+                {/* Overlay Controls (Zoom, Regen, Share, Download) */}
                 {sheetUrl && !isGenerating && (
                     <div className="absolute top-4 right-4 flex flex-col gap-2 z-20">
                          <button onClick={(e) => { e.stopPropagation(); handleAction(onZoom); }} className="text-white hover:text-cyan-400 transition-colors p-2 bg-black/60 hover:bg-black/80 rounded-lg backdrop-blur-sm" title={t.zoom}>
                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" /></svg>
                         </button>
+                        {onReGenerate && (
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); onReGenerate(); }} 
+                                className="text-white hover:text-cyan-400 transition-colors p-2 bg-black/60 hover:bg-black/80 rounded-lg backdrop-blur-sm" 
+                                title={t.regenerateTooltip}
+                            >
+                                <RegenIcon className="w-5 h-5" />
+                            </button>
+                        )}
                          <button onClick={(e) => { e.stopPropagation(); handleAction(onShare); }} className="text-white hover:text-cyan-400 transition-colors p-2 bg-black/60 hover:bg-black/80 rounded-lg backdrop-blur-sm" title={t.share}>
                             <ShareIcon className="w-5 h-5" />
                         </button>
@@ -250,7 +273,7 @@ const TurntableGallery: React.FC<TurntableGalleryProps> = ({ title, sheetUrl, on
             </div>
 
             {/* Navigation Pad Control */}
-            {sheetUrl && !isGenerating && (
+            {sheetUrl && !isGenerating ? (
                 <div className="flex justify-center items-center mt-2">
                     <div className="relative w-32 h-32 bg-gray-800 rounded-xl shadow-inner border border-gray-700 flex items-center justify-center">
                         <div className="absolute inset-0 bg-gradient-to-br from-gray-700/50 to-transparent rounded-xl pointer-events-none" />
@@ -296,6 +319,10 @@ const TurntableGallery: React.FC<TurntableGalleryProps> = ({ title, sheetUrl, on
                             <div className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse"></div>
                         </div>
                     </div>
+                </div>
+            ) : (
+                <div className="h-32 flex items-center justify-center border border-gray-800 border-dashed rounded-xl mt-2 bg-gray-900/20">
+                    <span className="text-xs text-gray-700 uppercase font-bold tracking-widest">3D Controller</span>
                 </div>
             )}
         </div>

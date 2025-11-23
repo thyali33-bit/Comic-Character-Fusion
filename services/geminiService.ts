@@ -1,18 +1,49 @@
 
 import { GoogleGenAI, Part, GenerateContentResponse } from "@google/genai";
-import { Accessories, InfluenceValues, GenerationParams } from '../types';
+import { Accessories, InfluenceValues, GenerationParams, ExpressionIntensity, OrthoViews } from '../types';
 
-// Helper to find the first image part from a response
-const findImagePart = (response: GenerateContentResponse): Part | undefined => {
+// Initialize Gemini API
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+const MODEL_STANDARD = 'gemini-2.5-flash-image';
+const MODEL_HD = 'gemini-3-pro-image-preview';
+
+// Dictionary mapping internal style keys to detailed prompts
+const STYLE_PROMPTS: Record<string, string> = {
+    ghibli: "Studio Ghibli Style. Hayao Miyazaki aesthetic. Soft, natural lighting. Distinctive facial features. Whimsical and detailed.",
+    one_piece: "One Piece Anime Style (Eiichiro Oda). Exaggerated expressions. Bold line art. Dynamic shading.",
+    doraemon: "Doraemon Style (Fujiko F. Fujio). Retro, round shapes. Simple, clean lines. 1970s anime aesthetic.",
+    chibi: "Chibi Style. 2-3 heads tall. Large head, tiny body. Simplified details. Cute and round.",
+    dragon_ball: "Dragon Ball Z Style (Akira Toriyama). Angular musculature. High contrast cel-shading. Thick black outlines. Dynamic energy. DO NOT CHANGE FACE SHAPE.",
+    comic: "American Comic Book Style. Jim Lee / Marvel style. Bold black ink outlines. Cross-hatching. Dynamic anatomy. Dramatic lighting.",
+    ukiyoe: "Ukiyo-e Style (Japanese Woodblock). Flat perspective. Bold outlines. Traditional patterns. Textured paper feel.",
+    renaissance: "Renaissance Oil Painting. Da Vinci style. Sfumato blending. Realistic anatomy. Dramatic chiaroscuro lighting.",
+    pixel: "Pixel Art. 16-bit SNES style. Dithering. Limited color palette. Blocky shapes.",
+    cyberpunk: "Cyberpunk Concept Art. Neon lights. High tech aesthetic. Chromatic aberration. Dark atmosphere.",
+    watercolor: "Watercolor Illustration. Wet-on-wet technique. Paint bleeds. Soft edges. White paper texture.",
+    disney_3d: "Disney/Pixar 3D Render Style. Soft subsurface scattering on skin. Expressive features. Ambient occlusion. Cinema lighting."
+};
+
+// Helper to find the first image part from a response, or throw error with text content
+const findImagePartOrThrow = (response: GenerateContentResponse, context: string): Part => {
     if (!response.candidates?.[0]?.content?.parts) {
-        return undefined;
+        throw new Error(`${context}: Empty response from AI.`);
     }
+    
+    // Try to find image
     for (const part of response.candidates[0].content.parts) {
         if (part.inlineData) {
             return part;
         }
     }
-    return undefined;
+
+    // If no image, check for text (usually an error/refusal message)
+    const textPart = response.candidates[0].content.parts.find(p => p.text);
+    if (textPart?.text) {
+        throw new Error(`${context} Failed: ${textPart.text}`);
+    }
+
+    throw new Error(`${context}: No image generated.`);
 };
 
 // Helper to convert base64 URL to a Part object for the Gemini API
@@ -32,332 +63,377 @@ const fileToGenerativePart = (base64Data: string): Part => {
   };
 };
 
-const getInfluenceStrength = (value: number): string => {
-    if (value > 90) return "Dominant. Follow this reference strictly.";
-    if (value > 50) return "Strong. Incorporate key elements.";
-    return "Subtle. Use as a minor hint.";
+const getBackgroundPrompt = (params: GenerationParams): string => {
+    if (params.backgroundType === 'solid') {
+        return `BACKGROUND: SOLID FLAT COLOR (${params.backgroundColor}). NO texture, NO gradient, NO shadows.`;
+    } else if (params.backgroundType === 'scene') {
+        return `BACKGROUND: ${params.backgroundPrompt || 'A suitable environment'}. Cinematic depth of field.`;
+    } else {
+        return `BACKGROUND: Neutral Studio Grey. Soft gradient. Professional lighting.`;
+    }
 };
 
-const getQualityPrompt = (quality: string): string => {
-    if (quality === 'hd') {
-        return `
-          **QUALITY MANDATE (HD):**
-          - Generate an ultra-high-quality, 4K resolution image.
-          - Meticulous attention to detail, clean linework, and sophisticated shading.
-          - Professional portfolio-grade finish.
-        `;
+const getStyleDescription = (params: GenerationParams): string => {
+    let baseStyle = STYLE_PROMPTS[params.artStyle] || STYLE_PROMPTS['comic'];
+    
+    if (params.artStylePrompt) {
+        baseStyle += ` CUSTOM STYLE TWEAK: ${params.artStylePrompt}.`;
     }
+
+    if (params.isBlackAndWhite) {
+        return `${baseStyle} COLOR MODE: BLACK AND WHITE INK ONLY. High contrast. No color.`;
+    }
+    
+    return `${baseStyle} COLOR MODE: FULL VIBRANT COLORS.`;
+};
+
+const getExpressionAdjective = (intensity: ExpressionIntensity): string => {
+    switch(intensity) {
+        case 'low': return 'Slightly';
+        case 'high': return 'Extremely';
+        default: return 'Moderately';
+    }
+};
+
+// --- CHIMERA PROMPT BUILDER ---
+const buildChimeraPrompt = (params: GenerationParams, specificViewInstructions: string, manifest: string): string => {
+    const shouldIncludeAccessories = params.clothingImage && params.enableColorOverride;
+
+    const accessoriesList = shouldIncludeAccessories
+        ? Object.entries(params.accessories)
+            .filter(([_, enabled]) => enabled)
+            .map(([name]) => name)
+            .join(', ')
+        : '';
+    
+    const accessoriesPrompt = accessoriesList 
+        ? `MANDATORY ACCESSORIES: ${accessoriesList}.` 
+        : '';
+
+    const colorOverride = params.enableColorOverride
+        ? `COLOR PALETTE OVERRIDE: Ignore Source 2 colors. REPAINT outfit using Primary: ${params.primaryColor}, Secondary: ${params.secondaryColor}.`
+        : `COLOR PALETTE: STRICTLY KEEP colors from Source 2 (Outfit).`;
+
+    const backgroundInstruction = getBackgroundPrompt(params);
+    const styleInstruction = getStyleDescription(params);
+    const characterDesc = params.prompt ? `CHARACTER TRAITS: ${params.prompt}` : '';
+
     return `
-      **QUALITY MANDATE (Standard):**
-      - High-quality digital image, clear and visually appealing.
+    ROLE: You are a forensic artist and master character designer.
+    
+    --- INPUT MANIFEST ---
+    ${manifest}
+
+    --- MASTER INSTRUCTION ---
+    Create a composite character by merging the sources below.
+    
+    1. **FACE (SOURCE 1 - IDENTITY LOCK)**:
+       - **PRIORITY: ABSOLUTE**.
+       - **GEOMETRY LOCK**: You MUST preserve the exact geometric shape of Source 1's eyes, nose, mouth, and jawline.
+       - **STRICT RULE FOR ANIME STYLES (e.g., Dragon Ball)**: 
+         - DO NOT replace the source eyes with generic Anime/Goku eyes. 
+         - DO NOT simplify the nose to a triangle.
+         - Keep the Source 1 facial anatomy, just apply the *shading* and *line weight* of the style.
+       - **FACE SWAP TECHNIQUE**: Imagine you are photoshopping Source 1's face onto the drawing, then applying a style filter. 
+       - The *likeness* must be unmistakable. If the output face looks generic, you have FAILED.
+
+    2. **OUTFIT (SOURCE 2 - COSTUME)**:
+       - **PRIORITY: HIGH**.
+       - The character is wearing the outfit from Source 2.
+       - Copy the design details (buttons, patterns, shape) exactly.
+       - ${colorOverride}
+       - ${accessoriesPrompt}
+
+    3. **ART STYLE (RENDERING ENGINE)**:
+       - ${styleInstruction}
+       - Apply this style's lighting, shading, and texture to the whole image.
+
+    --- OUTPUT TASK ---
+    ${specificViewInstructions}
+    
+    ${characterDesc}
+    
+    ${backgroundInstruction}
     `;
-};
-
-// Helper function to build the accessories string
-const buildAccessoriesString = (accessories: Accessories, clothingImage: string | null): string => {
-    const accessoriesToSave = Object.entries(accessories)
-        .filter(([, value]) => value)
-        .map(([key]) => {
-            if (key === 'bracelets') return 'bracelets (vòng tay)';
-            if (key === 'necklaces') return 'necklaces (vòng cổ)';
-            if (key === 'earrings') return 'earrings (khuyên tai)';
-            if (key === 'eyeglasses') return 'eyeglasses (kính mắt)';
-            return '';
-        })
-        .filter(Boolean);
-    
-    return (clothingImage && accessoriesToSave.length > 0)
-        ? `**ACCESSORIES CHECKLIST:** You MUST include these specific items from the Clothing Reference (Image 2): ${accessoriesToSave.join(', ')}. If Image 2 has a hat/helmet, include it.`
-        : "Do not include jewelry unless it is built into the clothing. If Image 2 has a hat/helmet, include it.";
-};
-
-const buildChimeraPrompt = (params: GenerationParams): string => {
-    const { faceImage, clothingImage, styleImage, accessories, influences, prompt, primaryColor, secondaryColor, enableColorOverride } = params;
-    const accessoriesStr = buildAccessoriesString(accessories, clothingImage);
-
-    let chimeraPrompt = `
-    **MISSION: CHIMERA CHARACTER SYNTHESIS**
-    You are an advanced character engine. Your task is to construct a new character by surgically combining attributes from specific source images.
-    
-    **STRICT SOURCE ASSIGNMENT (DO NOT MIX THESE ROLES):**
-    `;
-
-    if (faceImage) {
-        chimeraPrompt += `
-    1.  **IMAGE ASSET 1 (THE FACE) -> BIOLOGICAL SOURCE**
-        *   **Input:** The first image provided.
-        *   **Action:** Extract the facial features (eyes, nose, mouth, jaw, skin tone).
-        *   **Rule:** The final character's face MUST look like this person.
-        `;
-    }
-
-    if (clothingImage) {
-        chimeraPrompt += `
-    2.  **IMAGE ASSET 2 (THE COSTUME) -> MANNEQUIN SOURCE**
-        *   **Input:** The second image provided.
-        *   **Action:** Extract the outfit, hat, helmet, and glasses.
-        *   **CRITICAL CONSTRAINT:** Treat this image as a **HEADLESS MANNEQUIN**.
-            - **IGNORE THE FACE** of the person in this image.
-            - **IGNORE THE BODY PROPORTIONS** (height, weight, build) of this image.
-            - ONLY take the clothing items and wrap them around the body defined by Image 3.
-        *   ${accessoriesStr}
-        `;
-    }
-
-    if (styleImage) {
-        chimeraPrompt += `
-    3.  **IMAGE ASSET 3 (THE STYLE & ANATOMY) -> ART DIRECTOR**
-        *   **Input:** The third image provided.
-        *   **Action:** Extract the Art Style (line weight, coloring, shading) AND the **BODY PROPORTIONS**.
-        *   **Rule:**
-            - If Image 3 is Chibi, the result MUST be Chibi.
-            - If Image 3 is a muscular giant, the result MUST be a muscular giant.
-            - If Image 3 is a slender anime character, the result MUST be slender.
-            - **Use the anatomy/skeleton of Image 3, wearing the clothes of Image 2, with the face of Image 1.**
-        *   **Negative Constraint:** Do NOT copy specific unique features (horns, wings, tail) from Image 3 unless they are part of the generic body type.
-        `;
-    }
-
-    if (enableColorOverride) {
-        chimeraPrompt += `
-    **COLOR OVERRIDE INSTRUCTIONS:**
-    You MUST override the original colors of the clothing from Image 2 with the following palette:
-    - **Primary Color (Main Fabrics/Armor):** ${primaryColor}
-    - **Secondary Color (Accents/Trims/Details):** ${secondaryColor}
-    - Apply these colors logically to the outfit extracted from Image 2.
-    `;
-    }
-
-    chimeraPrompt += `
-    **USER DESCRIPTION:** ${prompt || "Create a full body shot."}
-    
-    **INFLUENCE SETTINGS:**
-    - Character Face Similarity: ${getInfluenceStrength(influences.character)}
-    - Clothing Accuracy: ${getInfluenceStrength(influences.clothing)}
-    - Style/Proportions adherence: ${getInfluenceStrength(influences.style)}
-    `;
-
-    return chimeraPrompt;
-};
-
-export const generatePortrait = async (params: GenerationParams): Promise<string> => {
-    const { faceImage, styleImage, clothingImage, quality } = params;
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-    
-    const imageInputs: { role: 'user', parts: Part[] }[] = [];
-    const parts: Part[] = [];
-
-    // Order matters for the prompt references "Image Asset 1", etc.
-    if (faceImage) parts.push(fileToGenerativePart(faceImage));
-    if (clothingImage) parts.push(fileToGenerativePart(clothingImage));
-    if (styleImage) parts.push(fileToGenerativePart(styleImage));
-
-    const systemPrompt = `
-    ${buildChimeraPrompt(params)}
-    ${getQualityPrompt(quality)}
-    
-    **FINAL OUTPUT INSTRUCTION:**
-    Generate a single, full-body character portrait on a simple background. 
-    Ensure the head (Image 1) connects naturally to the body (Image 3 proportions) wearing the clothes (Image 2).
-    `;
-
-    parts.push({ text: systemPrompt });
-    imageInputs.push({ role: 'user', parts });
-
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: imageInputs,
-        config: {
-            temperature: 0.4, // Lower temperature for better adherence to instructions
-        }
-    });
-
-    const imagePart = findImagePart(response);
-    if (!imagePart || !imagePart.inlineData) {
-        throw new Error("No image generated. Please try again.");
-    }
-
-    return `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`;
-};
-
-export const generateOrthoSheet = async (portraitImage: string, params: GenerationParams): Promise<string> => {
-    const { orthoPose, quality } = params;
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-
-    const prompt = `
-    **TASK: CHARACTER REFERENCE SHEET**
-    Input Image: The "Canonical Character Design".
-    
-    Generate an **Orthographic Character Sheet** for this EXACT character.
-    - **Views:** Front, Back, Left Side, Right Side.
-    - **Pose:** ${orthoPose} (consistent across all views).
-    - **Style:** Flat, clean lines, neutral lighting (Reference Sheet style).
-    - **Consistency:** ABSOLUTE. The face, outfit, and proportions must match the Input Image perfectly.
-    ${getQualityPrompt(quality)}
-    `;
-
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [
-            {
-                role: 'user',
-                parts: [fileToGenerativePart(portraitImage), { text: prompt }]
-            }
-        ]
-    });
-
-    const imagePart = findImagePart(response);
-    if (!imagePart || !imagePart.inlineData) {
-         throw new Error("No image generated.");
-    }
-
-    return `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`;
-};
-
-export const generateAngledSheet = async (portraitImage: string, params: GenerationParams): Promise<string> => {
-    const { angledPose, quality } = params;
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-
-    const prompt = `
-    **TASK: DYNAMIC POSE SHEET**
-    Input Image: The "Canonical Character Design".
-    
-    Generate a sheet with **4 different dynamic poses** of this character.
-    - **Pose Theme:** ${angledPose}.
-    - **Consistency:** The character must look identical to the Input Image in every pose (same face, same clothes).
-    ${getQualityPrompt(quality)}
-    `;
-
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [
-            {
-                role: 'user',
-                parts: [fileToGenerativePart(portraitImage), { text: prompt }]
-            }
-        ]
-    });
-
-    const imagePart = findImagePart(response);
-    if (!imagePart || !imagePart.inlineData) {
-        throw new Error("No image generated.");
-    }
-
-    return `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`;
-};
-
-export const generateTurntableViews = async (portraitImage: string, params: GenerationParams): Promise<string> => {
-    const { quality, threeDActionPrompt, styleImage } = params;
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-    
-    // We include the style image to enforce anatomy, but rely on portrait for the design.
-    const parts = [fileToGenerativePart(portraitImage)];
-    if (styleImage) parts.push(fileToGenerativePart(styleImage));
-
-    const actionText = threeDActionPrompt ? `Action: ${threeDActionPrompt}` : "Pose: A-Pose or Neutral Standing";
-
-    const prompt = `
-    **TASK: 3D MODEL TEXTURE/SPRITE SHEET GENERATION**
-    
-    **INPUTS:**
-    1. **Image 1 (Primary):** The Master Character Design.
-    2. **Image 2 (Secondary):** Anatomy/Style Reference (Use ONLY for body proportions if Image 1 is unclear).
-
-    **OBJECTIVE:**
-    Generate a **2x2 Sprite Sheet** containing 4 rotation views of the character from Image 1.
-    - Top-Left: 0 degrees (Front)
-    - Top-Right: 90 degrees (Right Profile)
-    - Bottom-Left: 180 degrees (Back)
-    - Bottom-Right: 270 degrees (Left Profile)
-
-    **STRICT CONSTRAINTS:**
-    1.  **THE DIGITAL STATUE RULE:** Treat the character as a solid, frozen 3D object. The pose, facial expression, hair physics, and clothing folds must be IDENTICAL in all 4 slots. Only the camera moves.
-    2.  **PROPORTIONS:** You MUST respect the body proportions (height, head-to-body ratio) of the provided images. **Do NOT default to realistic proportions if the input is stylized/chibi.**
-    3.  **CONSISTENCY:** The face in the 0 degree view must match the input portrait perfectly. The back view must logically deduce the back of the outfit based on the front.
-    4.  **RENDERING:** High-end 3D render style, 4K, ambient occlusion, cinematic lighting.
-    
-    ${actionText}
-    ${getQualityPrompt(quality)}
-    `;
-    
-    parts.push({ text: prompt });
-
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [{ role: 'user', parts }]
-    });
-
-    const imagePart = findImagePart(response);
-    if (!imagePart || !imagePart.inlineData) {
-        throw new Error("No turntable generated.");
-    }
-
-    return `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`;
-};
-
-export const generate3DViewAngle = async (portraitImage: string, params: GenerationParams, angle: number): Promise<string> => {
-     // Deprecated/Legacy support if needed, but TurntableGallery uses the sheet now.
-     // We map single angle requests to a similar logic if called individually.
-    return generateTurntableViews(portraitImage, params);
 };
 
 export const generateCharacterAssets = async (params: GenerationParams) => {
+    console.log("Starting full character generation...");
+    
+    // 1. Generate the main Portrait first
     const portrait = await generatePortrait(params);
-
-    const [orthoSheet, angledSheet, turntableSheet] = await Promise.all([
-        generateOrthoSheet(portrait, params),
+    
+    // 2. Generate the sheets in parallel.
+    // Split Ortho generation into 3 individual frames
+    const [orthoFront, orthoSide, orthoBack, angledSheet, turntableSheet] = await Promise.all([
+        generateOrthoView(portrait, params, 'FRONT'),
+        generateOrthoView(portrait, params, 'SIDE'),
+        generateOrthoView(portrait, params, 'BACK'),
         generateAngledSheet(portrait, params),
         generateTurntableViews(portrait, params)
     ]);
 
-    return {
-        portrait,
-        orthoSheet,
-        angledSheet,
-        turntableSheet
+    const orthoViews: OrthoViews = {
+        front: orthoFront,
+        side: orthoSide,
+        back: orthoBack
     };
+
+    return { portrait, orthoViews, angledSheet, turntableSheet };
 };
 
-export const generateVariationAssets = async (basePortrait: string, strength: number, params: GenerationParams) => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-    
-    const prompt = `
-    **TASK: CHARACTER VARIATION**
-    Input: A character portrait.
-    Action: Create a variation of this character with a ${strength}% deviation.
-    - Keep the core identity and color palette.
-    - Slightly alter the pose or accessory details.
-    - Maintain the original art style.
-    `;
+export const generatePortrait = async (params: GenerationParams): Promise<string> => {
+    const parts: Part[] = [];
+    let manifest = "";
+    let imageCounter = 0;
+    const imageParts: Part[] = [];
 
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [
-            {
-                role: 'user',
-                parts: [fileToGenerativePart(basePortrait), { text: prompt }]
-            }
-        ]
-    });
-
-    const imagePart = findImagePart(response);
-    if (!imagePart || !imagePart.inlineData) {
-        throw new Error("Failed to generate variation.");
+    // 1. FACE (Source 1)
+    if (params.faceImage) {
+        imageParts.push(fileToGenerativePart(params.faceImage));
+        imageCounter++;
+        manifest += `IMAGE ${imageCounter}: [Source 1 - FACE IDENTITY] **CRITICAL**. Use this EXACT face.\n`;
     }
 
-    const newPortrait = `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`;
-    
-    // Regenerate sheets based on new portrait
-    const [orthoSheet, angledSheet, turntableSheet] = await Promise.all([
-        generateOrthoSheet(newPortrait, params),
-        generateAngledSheet(newPortrait, params),
-        generateTurntableViews(newPortrait, params)
-    ]);
+    // 2. CLOTHING (Source 2)
+    if (params.clothingImage) {
+        imageParts.push(fileToGenerativePart(params.clothingImage));
+        imageCounter++;
+        manifest += `IMAGE ${imageCounter}: [Source 2 - OUTFIT] Copy this clothing design.\n`;
+    }
 
-    return {
-        portrait: newPortrait,
-        orthoSheet,
-        angledSheet,
-        turntableSheet
+    manifest += `STYLE: ${params.artStyle}.\n`;
+    
+    const expressionText = params.facialExpression === 'from_reference' 
+        ? 'MATCH SOURCE 1 EXPRESSION EXACTLY' 
+        : `${getExpressionAdjective(params.facialExpressionIntensity)} ${params.facialExpression}`;
+
+    const prompt = buildChimeraPrompt(params, `
+        VIEW: CLOSE-UP BUST PORTRAIT (Head and Shoulders).
+        COMPOSITION: Front-facing, centered.
+        INSTRUCTION: Generate a high-quality portrait. Ensure the face matches Source 1 perfectly in terms of anatomy.
+        POSE: Expression: ${expressionText}.
+        CROP: Head to Chest ONLY. Do not draw full body.
+    `, manifest);
+
+    parts.push({ text: prompt });
+    parts.push(...imageParts);
+
+    const modelName = params.quality === 'hd' ? MODEL_HD : MODEL_STANDARD;
+    
+    const response = await ai.models.generateContent({
+        model: modelName,
+        contents: { parts },
+        config: {
+            imageConfig: {
+                aspectRatio: "1:1",
+                numberOfImages: 1
+            }
+        }
+    });
+
+    const imagePart = findImagePartOrThrow(response, "Portrait Generation");
+    return `data:${imagePart.inlineData!.mimeType};base64,${imagePart.inlineData!.data}`;
+};
+
+export const generateOrthoView = async (portraitImage: string, params: GenerationParams, viewType: 'FRONT' | 'SIDE' | 'BACK'): Promise<string> => {
+    const parts: Part[] = [];
+    
+    // Inject Original Outfit Source for Design Precision
+    if (params.clothingImage) {
+        parts.push({ text: "REFERENCE A (OUTFIT DESIGN - STRICT):" });
+        parts.push(fileToGenerativePart(params.clothingImage));
+    }
+
+    // Inject Generated Portrait for Head Consistency
+    parts.push({ text: "REFERENCE B (HEAD/FACE - STRICT):" });
+    parts.push(fileToGenerativePart(portraitImage));
+
+    const viewInstructions = {
+        'FRONT': "VIEW: FRONT VIEW. Full body. Facing camera directly.",
+        'SIDE': "VIEW: LEFT SIDE VIEW (PROFILE). Full body. Facing left.",
+        'BACK': "VIEW: BACK VIEW. Full body. Facing away."
     };
+
+    const prompt = `
+    TASK: Generate a Single Technical Orthographic Frame: ${viewType}.
+    
+    STYLE: ${getStyleDescription(params)}
+    
+    INSTRUCTIONS:
+    1. Draw the character from REFERENCE B (Head) wearing the outfit from REFERENCE A.
+    2. **IDENTITY**: You MUST use the exact face/head from REFERENCE B. Do not redraw the face with different features.
+    3. **VIEW**: ${viewInstructions[viewType]}
+    4. **PROJECTION**: Orthographic/Parallel projection. No foreshortening. No perspective distortion.
+    5. **POSE**: ${params.orthoPose.toUpperCase()} (Neutral Standing). Arms slightly away from body. Legs straight.
+    6. **FRAMING**: FULL BODY. Do not crop head or feet. Centered.
+    
+    BACKGROUND: Plain White.
+    `;
+
+    parts.unshift({ text: prompt });
+
+    const modelName = params.quality === 'hd' ? MODEL_HD : MODEL_STANDARD;
+
+    // Use 9:16 for individual character frames (tall aspect ratio)
+    const response = await ai.models.generateContent({
+        model: modelName,
+        contents: { parts },
+        config: {
+            imageConfig: {
+                aspectRatio: "9:16", 
+                numberOfImages: 1
+            }
+        }
+    });
+
+    const imagePart = findImagePartOrThrow(response, `Ortho ${viewType} Generation`);
+    return `data:${imagePart.inlineData!.mimeType};base64,${imagePart.inlineData!.data}`;
+};
+
+export const generateAngledSheet = async (portraitImage: string, params: GenerationParams): Promise<string> => {
+    const parts: Part[] = [];
+
+    if (params.clothingImage) {
+        parts.push({ text: "REFERENCE A (OUTFIT - DO NOT CHANGE DESIGN):" });
+        parts.push(fileToGenerativePart(params.clothingImage));
+    }
+
+    parts.push({ text: "REFERENCE B (HEAD - DO NOT CHANGE FACE):" });
+    parts.push(fileToGenerativePart(portraitImage));
+
+    const prompt = `
+    TASK: Generate a DYNAMIC ACTION POSE SHEET.
+    
+    STYLE: ${getStyleDescription(params)}
+    
+    INSTRUCTIONS:
+    1. Character: Head from Ref B, Outfit from Ref A.
+    2. **IDENTITY**: Strictly preserve the face from Reference B.
+    3. **ACTION**: Create 3 or 4 distinct, energetic poses.
+    4. **POSE TYPE**: ${params.angledPose}.
+    5. **COMPOSITION**: Distribute poses evenly on the page.
+    
+    BACKGROUND: ${getBackgroundPrompt(params)}
+    `;
+
+    parts.unshift({ text: prompt });
+
+    const modelName = params.quality === 'hd' ? MODEL_HD : MODEL_STANDARD;
+
+    const response = await ai.models.generateContent({
+        model: modelName,
+        contents: { parts },
+        config: {
+            imageConfig: {
+                aspectRatio: "3:4",
+                numberOfImages: 1
+            }
+        }
+    });
+
+    const imagePart = findImagePartOrThrow(response, "Angled Sheet Generation");
+    return `data:${imagePart.inlineData!.mimeType};base64,${imagePart.inlineData!.data}`;
+};
+
+export const generateTurntableViews = async (portraitImage: string, params: GenerationParams): Promise<string> => {
+    const parts: Part[] = [];
+
+    if (params.clothingImage) {
+        parts.push({ text: "REFERENCE A (OUTFIT):" });
+        parts.push(fileToGenerativePart(params.clothingImage));
+    }
+
+    parts.push({ text: "REFERENCE B (HEAD):" });
+    parts.push(fileToGenerativePart(portraitImage));
+
+    let baseStyle = STYLE_PROMPTS[params.artStyle] || STYLE_PROMPTS['comic'];
+    if (params.artStylePrompt) baseStyle += ` ${params.artStylePrompt}`;
+
+    const threeDStylePrompt = `
+    TRANSFORM STYLE INTO 3D: Interpret "${baseStyle}" as a high-fidelity digital figure.
+    RENDER: Octane Render, Global Illumination, Soft Shadows.
+    MATERIAL: Matte skin, realistic fabric textures.
+    ${params.isBlackAndWhite ? 'COLOR: Clay Render (Greyscale).' : 'COLOR: Full Color Render.'}
+    `;
+
+    const prompt = `
+    TASK: Generate a 2x2 SPRITE SHEET for a 3D Turntable.
+    
+    INSTRUCTIONS:
+    1. Character: Head from Ref B, Outfit from Ref A.
+    2. **IDENTITY**: STICK TO THE FACE OF REF B.
+    3. **LAYOUT**: 2x2 Grid.
+       Top-Left: FRONT View
+       Top-Right: RIGHT View
+       Bottom-Left: BACK View
+       Bottom-Right: LEFT View
+    4. **CONSTRAINT**: Frozen pose. Only camera rotates.
+    5. **POSE**: ${params.threeDActionPrompt || 'Standing Heroic Pose'}.
+    
+    STYLE: ${threeDStylePrompt}
+    BACKGROUND: ${getBackgroundPrompt(params)}
+    `;
+
+    parts.unshift({ text: prompt });
+
+    const response = await ai.models.generateContent({
+        model: MODEL_HD, 
+        contents: { parts },
+        config: {
+            imageConfig: {
+                aspectRatio: "1:1",
+                numberOfImages: 1,
+                imageSize: "2K"
+            }
+        }
+    });
+
+    const imagePart = findImagePartOrThrow(response, "3D Turntable Generation");
+    return `data:${imagePart.inlineData!.mimeType};base64,${imagePart.inlineData!.data}`;
+};
+
+export const generate3DViewAngle = async (portraitImage: string, params: GenerationParams, angle: number): Promise<string> => {
+    const parts: Part[] = [];
+    
+    if (params.clothingImage) {
+        parts.push({ text: "OUTFIT REF" });
+        parts.push(fileToGenerativePart(params.clothingImage));
+    }
+    parts.push({ text: "HEAD REF" });
+    parts.push(fileToGenerativePart(portraitImage));
+
+    let baseStyle = STYLE_PROMPTS[params.artStyle] || STYLE_PROMPTS['comic'];
+    if (params.artStylePrompt) baseStyle += ` ${params.artStylePrompt}`;
+
+    const threeDStylePrompt = `
+    Interpret style "${baseStyle}" as a 3D RENDER.
+    High fidelity, ray tracing.
+    ${params.isBlackAndWhite ? 'Greyscale Clay Render.' : 'Full Color.'}
+    `;
+
+    const prompt = `
+    Render a single view of the character at ${angle} degrees (Y-axis rotation).
+    HEAD: Matches HEAD REF exactly.
+    OUTFIT: Matches OUTFIT REF exactly.
+    STYLE: ${threeDStylePrompt}
+    ACTION: ${params.threeDActionPrompt || 'Standing'}.
+    `;
+    
+    parts.unshift({ text: prompt });
+    
+    const response = await ai.models.generateContent({
+        model: MODEL_HD,
+        contents: { parts },
+        config: { 
+            imageConfig: { 
+                aspectRatio: "1:1", 
+                numberOfImages: 1,
+                imageSize: "2K"
+            } 
+        }
+    });
+    
+    const imagePart = findImagePartOrThrow(response, "Single 3D View Generation");
+    return `data:${imagePart.inlineData!.mimeType};base64,${imagePart.inlineData!.data}`;
 };

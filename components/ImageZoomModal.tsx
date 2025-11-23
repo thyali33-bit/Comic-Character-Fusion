@@ -1,6 +1,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
+import DownloadIcon from './icons/DownloadIcon';
+import ShareIcon from './icons/ShareIcon';
 
 interface ImageZoomModalProps {
   imageUrl: string | null;
@@ -80,10 +82,41 @@ const ImageZoomModal: React.FC<ImageZoomModalProps> = ({ imageUrl, onClose }) =>
     }
   };
 
+  const handleDownload = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      const link = document.createElement('a');
+      link.href = imageUrl;
+      link.download = `zoomed-image-${Date.now()}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+  };
+
+  const handleShare = async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      try {
+          const response = await fetch(imageUrl);
+          const blob = await response.blob();
+          const file = new File([blob], 'share-image.png', { type: blob.type });
+
+          if (navigator.share && navigator.canShare({ files: [file] })) {
+              await navigator.share({
+                  title: 'Comic Character',
+                  files: [file],
+              });
+          } else {
+              await navigator.clipboard.writeText(imageUrl);
+              alert(t.shareFallback); // Simple fallback alert for modal context
+          }
+      } catch (error) {
+          console.error('Share failed', error);
+      }
+  };
+
 
   return (
     <div
-      className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4"
+      className="fixed inset-0 bg-black/95 flex items-center justify-center z-[100] p-4"
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUpOrLeave}
       onMouseLeave={handleMouseUpOrLeave}
@@ -92,14 +125,16 @@ const ImageZoomModal: React.FC<ImageZoomModalProps> = ({ imageUrl, onClose }) =>
       aria-modal="true"
       aria-label={t.imageViewer}
     >
+      {/* Top Controls */}
       <button
         onClick={onClose}
-        className="absolute top-4 right-4 text-white text-4xl font-bold hover:text-cyan-400 transition-colors z-50"
+        className="absolute top-4 right-4 text-white/70 hover:text-cyan-400 text-4xl font-bold transition-colors z-50 p-2"
         aria-label={t.close}
       >
         &times;
       </button>
 
+      {/* Main Image Area */}
       <div 
         className="w-full h-full flex items-center justify-center overflow-hidden"
         onClick={(e) => e.stopPropagation()} // Prevent closing when clicking inside the pan area
@@ -117,6 +152,29 @@ const ImageZoomModal: React.FC<ImageZoomModalProps> = ({ imageUrl, onClose }) =>
           onMouseDown={handleMouseDown}
           draggable={false}
         />
+      </div>
+
+      {/* Bottom Toolbar */}
+      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-gray-800/80 backdrop-blur-md px-6 py-3 rounded-full border border-gray-700 shadow-2xl z-50" onClick={(e) => e.stopPropagation()}>
+          <button 
+            onClick={handleShare}
+            className="flex items-center gap-2 text-gray-200 hover:text-cyan-400 transition-colors group"
+            title={t.share}
+          >
+              <ShareIcon className="w-5 h-5 group-hover:scale-110 transition-transform" />
+              <span className="text-sm font-medium">{t.share}</span>
+          </button>
+          
+          <div className="w-px h-6 bg-gray-600"></div>
+
+          <button 
+            onClick={handleDownload}
+            className="flex items-center gap-2 text-gray-200 hover:text-cyan-400 transition-colors group"
+            title={t.download}
+          >
+              <DownloadIcon className="w-5 h-5 group-hover:scale-110 transition-transform" />
+              <span className="text-sm font-medium">{t.download}</span>
+          </button>
       </div>
     </div>
   );
